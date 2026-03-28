@@ -6,6 +6,14 @@ import (
 	"kvschool/internal/coinflipper"
 )
 
+func keysEqual(key1, key2 []byte) bool {
+	return bytes.Equal(key1, key2)
+}
+
+func keysCompare(key1, key2 []byte) int {
+	return bytes.Compare(key1, key2)
+}
+
 // ErrNotFound означает отсутствие ключа (IMSI).
 var ErrNotFound = errors.New("skiplist: ключ не найден")
 
@@ -20,9 +28,19 @@ type Iterator interface {
 }
 
 type Node struct {
-	key       []byte
-	value     []byte
-	nextNodes []*Node
+	key   []byte
+	value []byte
+	next  []*Node
+}
+
+func insertAfter(predecessor, node *Node, level int) {
+	node.next = append(node.next, predecessor.next[level])
+	predecessor.next[level] = node
+}
+
+func createLevel(head, firstNode *Node) {
+	firstNode.next = append(firstNode.next, nil)
+	head.next = append(head.next, firstNode)
 }
 
 // SkipList — In-Memory движок для HLR.
@@ -39,8 +57,8 @@ type SkipList struct {
 
 // New создаёт SkipList. seed требуется для детерминируемых тестов (воспроизводимость поведения при ошибках).
 func New(seed int64) *SkipList {
-	probability := 0.1
-	head := Node{key: []byte{}, nextNodes: []*Node{nil}}
+	probability := 0.5
+	head := Node{key: []byte{}, next: []*Node{nil}}
 
 	return &SkipList{
 		head:        &head,
@@ -48,75 +66,107 @@ func New(seed int64) *SkipList {
 	}
 }
 
-func (s *SkipList) IsEmpty() bool {
-	return s.head.nextNodes[0] == nil
-}
-
-func (s *SkipList) findNearestNodes(key []byte) []*Node {
-	levelsNumber := len(s.head.nextNodes)
+func (s *SkipList) findPredecessors(key []byte) []*Node {
+	levelsNumber := s.GetLevelsNumber()
 	result := make([]*Node, levelsNumber)
 
-	current := s.head
+	currentNode := s.head
 	for level := levelsNumber - 1; level >= 0; level-- {
 		for {
-			if current.nextNodes[level] == nil {
-				result[level] = current
+			nextNode := currentNode.next[level]
+
+			if nextNode == nil {
+				result[level] = currentNode
 				break
 			}
 
-			if bytes.Compare(current.key, key) == 0 {
-				panic("UnImplemented")
-			}
-
-			if (current == s.head || bytes.Compare(current.key, key) < 0) && bytes.Compare(current.nextNodes[level].key, key) > 0 {
-				result[level] = current
+			cmp1 := keysCompare(currentNode.key, key)
+			cmp2 := keysCompare(nextNode.key, key)
+			if (currentNode == s.head || cmp1 <= 0) && cmp2 > 0 {
+				result[level] = currentNode
 				break
 			}
 
-			current = current.nextNodes[level]
+			currentNode = nextNode
 		}
 	}
 
 	return result
 }
 
+func (s *SkipList) IsEmpty() bool {
+	return s.head.next[0] == nil
+}
+
+func (s *SkipList) GetLevelsNumber() int {
+	return len(s.head.next)
+}
+
 func (s *SkipList) Put(key, value []byte) {
-	nearestNodes := s.findNearestNodes(key)
-	newNode := &Node{
-		key:       key,
-		value:     value,
-		nextNodes: make([]*Node, 1),
+	predecessors := s.findPredecessors(key)
+	zeroLevel := 0
+	zeroLevelPredecessor := predecessors[zeroLevel]
+
+	if keysEqual(zeroLevelPredecessor.key, key) {
+		zeroLevelPredecessor.value = value
+		return
 	}
 
-	// Гарантированная обработка нулевого уровня
-	newNode.nextNodes[0] = nearestNodes[0].nextNodes[0]
-	nearestNodes[0].nextNodes[0] = newNode
+	newNode := &Node{
+		key:   key,
+		value: value,
+		next:  make([]*Node, 0),
+	}
+	insertAfter(zeroLevelPredecessor, newNode, zeroLevel)
+	levelsNumber := s.GetLevelsNumber()
 
-	for i := 1; ; i++ {
+	for level := 1; ; level++ {
 		if !s.coinFlipper.Flip() {
 			break
 		}
 
-		if i >= len(nearestNodes) {
-			newNode.nextNodes = append(newNode.nextNodes, nil)
-			s.head.nextNodes = append(s.head.nextNodes, newNode)
+		if level >= levelsNumber {
+			createLevel(s.head, newNode)
 		} else {
-			newNode.nextNodes = append(newNode.nextNodes, nearestNodes[i].nextNodes[i])
-			nearestNodes[i].nextNodes[i] = newNode
+			insertAfter(predecessors[level], newNode, level)
 		}
 	}
 }
 
 func (s *SkipList) Get(key []byte) ([]byte, error) {
-	_ = s
-	_ = key
-	return nil, ErrNotImplemented
+	predecessors := s.findPredecessors(key)
+	zeroLevelPredecessor := predecessors[0]
+
+	if keysEqual(zeroLevelPredecessor.key, key) {
+		return zeroLevelPredecessor.value, nil
+	}
+
+	return nil, ErrNotFound
 }
 
 func (s *SkipList) Delete(key []byte) error {
-	_ = s
-	_ = key
-	return ErrNotImplemented
+	predecessors := s.findPredecessors(key)
+	zeroLevelPredecessor := predecessors[0]
+
+	if !keysEqual(zeroLevelPredecessor.key, key) {
+		return ErrNotFound
+	}
+
+	//// TODO: handle empty levels
+	//
+	//for i := 1; ; i++ {
+	//	if !s.coinFlipper.Flip() {
+	//		break
+	//	}
+	//
+	//	if i >= len(predecessors) {
+	//		createLevel(s.head, newNode)
+	//	} else {
+	//		insertAfter(predecessors[i], newNode, i)
+	//	}
+	//}
+
+	return nil
 }
 
 // Scan возвращает итератор по диапазону [start, end).
@@ -134,22 +184,20 @@ func (s *SkipList) GetRepresentation() string {
 		return "Empty SkipList"
 	}
 
+	levelsNumber := s.GetLevelsNumber()
 	representation := ""
-	for i := range s.head.nextNodes {
-		currentNode := s.head.nextNodes[i]
+
+	for level := 0; level < levelsNumber; level++ {
+		currentNode := s.head.next[level]
 		representation += string(currentNode.key)
-		currentNode = currentNode.nextNodes[i]
+		currentNode = currentNode.next[level]
 
-		for {
-			if currentNode == nil {
-				break
-			}
-
+		for currentNode != nil {
 			representation += "->" + string(currentNode.key)
-			currentNode = currentNode.nextNodes[i]
+			currentNode = currentNode.next[level]
 		}
 
-		representation += "\n"
+		representation += "\n\n"
 	}
 
 	return representation
