@@ -91,9 +91,7 @@ func (s *SkipList) findPredecessors(key []byte) []*Node {
 				break
 			}
 
-			cmp1 := keysCompare(currentNode.key, key)
-			cmp2 := keysCompare(nextNode.key, key)
-			if (currentNode == s.head || cmp1 < 0) && cmp2 >= 0 {
+			if keysCompare(nextNode.key, key) >= 0 {
 				result[level] = currentNode
 				break
 			}
@@ -114,6 +112,8 @@ func (s *SkipList) GetLevelsNumber() int {
 }
 
 func (s *SkipList) Put(key, value []byte) error {
+	// TODO: копировать key глубоко или нет?
+
 	predecessors := s.findPredecessors(key)
 	zeroLevel := 0
 	zeroLevelPredecessor := predecessors[zeroLevel]
@@ -127,7 +127,7 @@ func (s *SkipList) Put(key, value []byte) error {
 	newNode := &Node{
 		key:   key,
 		value: value,
-		next:  make([]*Node, 0),
+		next:  make([]*Node, 0, 1), // Allocate for the 0th level
 	}
 	insertAfter(zeroLevelPredecessor, newNode, zeroLevel)
 	levelsNumber := s.GetLevelsNumber()
@@ -148,6 +148,8 @@ func (s *SkipList) Put(key, value []byte) error {
 }
 
 func (s *SkipList) Get(key []byte) ([]byte, error) {
+	// TODO: отдавать ссылку или копию?!
+
 	predecessors := s.findPredecessors(key)
 
 	zeroLevel := 0
