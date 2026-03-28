@@ -3,6 +3,7 @@ package skiplist
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"kvschool/internal/coinflipper"
 )
 
@@ -33,14 +34,13 @@ type Node struct {
 	next  []*Node
 }
 
+func removeAfter(predecessor, node *Node, level int) {
+	predecessor.next[level] = node.next[level]
+}
+
 func insertAfter(predecessor, node *Node, level int) {
 	node.next = append(node.next, predecessor.next[level])
 	predecessor.next[level] = node
-}
-
-func createLevel(head, firstNode *Node) {
-	firstNode.next = append(firstNode.next, nil)
-	head.next = append(head.next, firstNode)
 }
 
 // SkipList — In-Memory движок для HLR.
@@ -66,6 +66,17 @@ func New(seed int64) *SkipList {
 	}
 }
 
+func (s *SkipList) removeHighestLevel() {
+	head := s.head
+	head.next = head.next[:len(head.next)-1]
+}
+
+func (s *SkipList) createLevel(firstNode *Node) {
+	head := s.head
+	firstNode.next = append(firstNode.next, nil)
+	head.next = append(head.next, firstNode)
+}
+
 func (s *SkipList) findPredecessors(key []byte) []*Node {
 	levelsNumber := s.GetLevelsNumber()
 	result := make([]*Node, levelsNumber)
@@ -82,7 +93,7 @@ func (s *SkipList) findPredecessors(key []byte) []*Node {
 
 			cmp1 := keysCompare(currentNode.key, key)
 			cmp2 := keysCompare(nextNode.key, key)
-			if (currentNode == s.head || cmp1 <= 0) && cmp2 > 0 {
+			if (currentNode == s.head || cmp1 < 0) && cmp2 >= 0 {
 				result[level] = currentNode
 				break
 			}
@@ -102,14 +113,15 @@ func (s *SkipList) GetLevelsNumber() int {
 	return len(s.head.next)
 }
 
-func (s *SkipList) Put(key, value []byte) {
+func (s *SkipList) Put(key, value []byte) error {
 	predecessors := s.findPredecessors(key)
 	zeroLevel := 0
 	zeroLevelPredecessor := predecessors[zeroLevel]
+	zeroLevelPredecessorSuccessor := zeroLevelPredecessor.next[zeroLevel]
 
-	if keysEqual(zeroLevelPredecessor.key, key) {
+	if zeroLevelPredecessorSuccessor != nil && keysEqual(zeroLevelPredecessorSuccessor.key, key) {
 		zeroLevelPredecessor.value = value
-		return
+		return nil
 	}
 
 	newNode := &Node{
@@ -126,18 +138,23 @@ func (s *SkipList) Put(key, value []byte) {
 		}
 
 		if level >= levelsNumber {
-			createLevel(s.head, newNode)
+			s.createLevel(newNode)
 		} else {
 			insertAfter(predecessors[level], newNode, level)
 		}
 	}
+
+	return nil
 }
 
 func (s *SkipList) Get(key []byte) ([]byte, error) {
 	predecessors := s.findPredecessors(key)
-	zeroLevelPredecessor := predecessors[0]
 
-	if keysEqual(zeroLevelPredecessor.key, key) {
+	zeroLevel := 0
+	zeroLevelPredecessor := predecessors[0]
+	zeroLevelPredecessorSuccessor := zeroLevelPredecessor.next[zeroLevel]
+
+	if zeroLevelPredecessorSuccessor != nil && keysEqual(zeroLevelPredecessorSuccessor.key, key) {
 		return zeroLevelPredecessor.value, nil
 	}
 
@@ -146,25 +163,31 @@ func (s *SkipList) Get(key []byte) ([]byte, error) {
 
 func (s *SkipList) Delete(key []byte) error {
 	predecessors := s.findPredecessors(key)
-	zeroLevelPredecessor := predecessors[0]
+	zeroLevel := 0
+	zeroLevelPredecessor := predecessors[zeroLevel]
+	zeroLevelPredecessorSuccessor := zeroLevelPredecessor.next[zeroLevel]
 
-	if !keysEqual(zeroLevelPredecessor.key, key) {
+	if zeroLevelPredecessorSuccessor == nil || !keysEqual(zeroLevelPredecessorSuccessor.key, key) {
 		return ErrNotFound
 	}
 
-	//// TODO: handle empty levels
-	//
-	//for i := 1; ; i++ {
-	//	if !s.coinFlipper.Flip() {
-	//		break
-	//	}
-	//
-	//	if i >= len(predecessors) {
-	//		createLevel(s.head, newNode)
-	//	} else {
-	//		insertAfter(predecessors[i], newNode, i)
-	//	}
-	//}
+	node := zeroLevelPredecessorSuccessor
+	for level := s.GetLevelsNumber() - 1; level >= 0; level-- {
+		levelPredecessor := predecessors[level]
+		levelPredecessorSuccessor := levelPredecessor.next[level]
+
+		if levelPredecessorSuccessor == nil || !keysEqual(levelPredecessorSuccessor.key, key) {
+			// The key is not present on the current level
+			continue
+		}
+
+		if levelPredecessor == s.head && node.next[level] == nil {
+			s.removeHighestLevel()
+		} else {
+			removeAfter(levelPredecessor, node, level)
+		}
+	}
+	node.next = nil // Help GC to quickly free node
 
 	return nil
 }
@@ -185,7 +208,7 @@ func (s *SkipList) GetRepresentation() string {
 	}
 
 	levelsNumber := s.GetLevelsNumber()
-	representation := ""
+	representation := fmt.Sprintf("%d levels\n", levelsNumber)
 
 	for level := 0; level < levelsNumber; level++ {
 		currentNode := s.head.next[level]
