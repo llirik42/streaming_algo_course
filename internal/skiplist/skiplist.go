@@ -86,7 +86,6 @@ func (s *SkipList) Put(key, value []byte) error {
 
 func (s *SkipList) Get(key []byte) ([]byte, error) {
 	predecessors := s.findPredecessors(key)
-
 	zeroLevel := 0
 	zeroLevelPredecessor := predecessors[0]
 	zeroLevelPredecessorSuccessor := zeroLevelPredecessor.next[zeroLevel]

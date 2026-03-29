@@ -336,58 +336,111 @@ func TestSkipList_ScanMultiple(t *testing.T) {
 	}
 }
 
-//func BenchmarkSomething(b *testing.B) {
-//	maxPower := 24
-//
-//	for i := 0; i <= maxPower; i++ {
-//		size := 1 << i
-//
-//		b.Run(fmt.Sprintf("size=%d", size), func(b *testing.B) {
-//			sl := New(1)
-//			keys := make([][]byte, size)
-//			values := make([][]byte, size)
-//
-//			for j := 0; j < size; j++ {
-//				keys[j] = stringToBytes(fmt.Sprintf("key-%d", j))
-//				values[j] = stringToBytes(fmt.Sprintf("value-%d", j))
-//			}
-//
-//			b.ReportAllocs()
-//			b.ResetTimer()
-//
-//			for j := 0; j < b.N; j++ {
-//				for k := 0; k < size; k++ {
-//					sl.Put(keys[k], values[k])
-//				}
-//			}
-//		})
-//	}
-//}
+func BenchmarkPutGetProbability(b *testing.B) {
+	for i := 1; i <= 99; i++ {
+		probability := float64(i) / 100.0
 
-//func BenchmarkSomething2(b *testing.B) {
-//	size := 1000000
-//	keys := make([][]byte, size)
-//	values := make([][]byte, size)
-//	for i := 0; i < size; i++ {
-//		keys[i] = stringToBytes(fmt.Sprintf("key-%d", i))
-//		values[i] = stringToBytes(fmt.Sprintf("value-%d", i))
-//	}
-//
-//	for i := 1; i <= 99; i++ {
-//		probability := float64(i) / 100.0
-//
-//		b.Run(fmt.Sprintf("p=%f", probability), func(b *testing.B) {
-//			sl := New(1)
-//			sl.SetProbability(probability)
-//
-//			b.ReportAllocs()
-//			b.ResetTimer()
-//
-//			for j := 0; j < b.N; j++ {
-//				for k := 0; k < size; k++ {
-//					sl.Put(keys[k], values[k])
-//				}
-//			}
-//		})
-//	}
-//}
+		b.Run(fmt.Sprintf("probability=%f", probability), func(b *testing.B) {
+			size := 100000
+			sl := New(1)
+			sl.SetProbability(probability)
+
+			keys := make([][]byte, size)
+			values := make([][]byte, size)
+
+			for j := 0; j < size; j++ {
+				keys[j] = stringToBytes(fmt.Sprintf("key-%d", j))
+				values[j] = stringToBytes(fmt.Sprintf("value-%d", j))
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+
+			for j := 0; j < b.N; j++ {
+				for k := 0; k < size; k++ {
+					key := keys[k]
+
+					if k%2 == 0 {
+						if err := sl.Put(key, values[k]); err != nil {
+							b.Fatalf("ошибка put: %v", err)
+						}
+					} else {
+						_, _ = sl.Get(key)
+					}
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkPutGetN(b *testing.B) {
+	for i := 1; i <= 200; i++ {
+		size := i * 10000
+
+		b.Run(fmt.Sprintf("size=%d", size), func(b *testing.B) {
+			sl := New(1)
+			keys := make([][]byte, size)
+			values := make([][]byte, size)
+
+			for j := 0; j < size; j++ {
+				keys[j] = stringToBytes(fmt.Sprintf("key-%d", j))
+				values[j] = stringToBytes(fmt.Sprintf("value-%d", j))
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+
+			for j := 0; j < b.N; j++ {
+				for k := 0; k < size; k++ {
+					key := keys[k]
+
+					if k%2 == 0 {
+						if err := sl.Put(key, values[k]); err != nil {
+							b.Fatalf("ошибка put: %v", err)
+						}
+					} else {
+						_, _ = sl.Get(key)
+					}
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkDeleteN(b *testing.B) {
+	for i := 1; i <= 150; i++ {
+		size := i * 10000
+
+		b.Run(fmt.Sprintf("size=%d", size), func(b *testing.B) {
+			slList := make([]*SkipList, b.N)
+
+			for i := 0; i < b.N; i++ {
+				slList[i] = New(1)
+			}
+
+			keys := make([][]byte, size)
+			values := make([][]byte, size)
+
+			for j := 0; j < size; j++ {
+				keys[j] = stringToBytes(fmt.Sprintf("key-%d", j))
+				values[j] = stringToBytes(fmt.Sprintf("value-%d", j))
+
+				for i := 0; i < b.N; i++ {
+					_ = slList[i].Put(keys[j], values[j])
+				}
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+
+			for j := 0; j < b.N; j++ {
+				for k := size - 1; k >= 0; k-- {
+					key := keys[k]
+					if err := slList[j].Delete(key); err != nil {
+						b.Fatalf("Delete: %v", err)
+					}
+				}
+			}
+		})
+	}
+}
