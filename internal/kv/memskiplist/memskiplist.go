@@ -16,6 +16,10 @@ func New(seed int64) *Store {
 	return &Store{sl: skiplist.New(seed)}
 }
 
+func (s *Store) GetSkipList() *skiplist.SkipList {
+	return s.sl
+}
+
 func (s *Store) Put(_ context.Context, key, value []byte) error {
 	return s.sl.Put(key, value)
 }

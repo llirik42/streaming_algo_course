@@ -23,13 +23,23 @@ type SkipList struct {
 
 // New создаёт SkipList. seed требуется для детерминируемых тестов (воспроизводимость поведения при ошибках).
 func New(seed int64) *SkipList {
-	probability := 0.5
+	defaultProbability := 0.5
 	head := Node{key: []byte{}, next: []*Node{nil}}
 
 	return &SkipList{
 		head:        &head,
-		coinFlipper: coinflipper.New(seed, probability),
+		coinFlipper: coinflipper.New(seed, defaultProbability),
 	}
+}
+
+func (s *SkipList) SetProbability(probability float64) error {
+	if probability <= 0 || probability >= 1 {
+		return errors.New("skiplist: вероятность должна быть больше нуля и меньше единицы")
+	}
+
+	s.coinFlipper = coinflipper.New(s.coinFlipper.GetSeed(), probability)
+
+	return nil
 }
 
 func (s *SkipList) IsEmpty() bool {
