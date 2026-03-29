@@ -7,6 +7,15 @@ import (
 	"kvschool/internal/coinflipper"
 )
 
+func clone(b []byte) []byte {
+	if b == nil {
+		return nil
+	}
+	out := make([]byte, len(b))
+	copy(out, b)
+	return out
+}
+
 func keysEqual(key1, key2 []byte) bool {
 	return bytes.Equal(key1, key2)
 }
@@ -17,9 +26,6 @@ func keysCompare(key1, key2 []byte) int {
 
 // ErrNotFound означает отсутствие ключа (IMSI).
 var ErrNotFound = errors.New("skiplist: ключ не найден")
-
-// ErrNotImplemented используется в заготовке практики первого дня.
-var ErrNotImplemented = errors.New("skiplist: функция не реализована")
 
 // Iterator — упорядоченная итерация по диапазону ключей (Range Scan).
 // В HLR используется для выгрузки абонентов по префиксу IMSI.
@@ -32,6 +38,35 @@ type Node struct {
 	key   []byte
 	value []byte
 	next  []*Node
+}
+
+type SkipListIterator struct {
+	current *Node
+	end     *Node
+}
+
+func (s *SkipListIterator) Next() (key, value []byte, ok bool, err error) {
+	// TODO: нужно возвращать другие ошибки (то что конец)
+
+	if s.current == nil {
+		return nil, nil, false, nil
+	}
+
+	if s.current == s.end {
+		return nil, nil, false, nil
+	}
+
+	node := s.current
+	zeroLevel := 0
+	s.current = s.current.next[zeroLevel]
+
+	return node.key, node.value, true, nil
+}
+
+func (s *SkipListIterator) Close() error {
+	s.current = nil
+	s.end = nil
+	return nil
 }
 
 func removeAfter(predecessor, node *Node, level int) {
@@ -112,8 +147,6 @@ func (s *SkipList) GetLevelsNumber() int {
 }
 
 func (s *SkipList) Put(key, value []byte) error {
-	// TODO: копировать key глубоко или нет?
-
 	predecessors := s.findPredecessors(key)
 	zeroLevel := 0
 	zeroLevelPredecessor := predecessors[zeroLevel]
@@ -125,8 +158,8 @@ func (s *SkipList) Put(key, value []byte) error {
 	}
 
 	newNode := &Node{
-		key:   key,
-		value: value,
+		key:   clone(key),
+		value: clone(value),
 		next:  make([]*Node, 0, 1), // Allocate for the 0th level
 	}
 	insertAfter(zeroLevelPredecessor, newNode, zeroLevel)
@@ -148,8 +181,6 @@ func (s *SkipList) Put(key, value []byte) error {
 }
 
 func (s *SkipList) Get(key []byte) ([]byte, error) {
-	// TODO: отдавать ссылку или копию?!
-
 	predecessors := s.findPredecessors(key)
 
 	zeroLevel := 0
@@ -157,7 +188,7 @@ func (s *SkipList) Get(key []byte) ([]byte, error) {
 	zeroLevelPredecessorSuccessor := zeroLevelPredecessor.next[zeroLevel]
 
 	if zeroLevelPredecessorSuccessor != nil && keysEqual(zeroLevelPredecessorSuccessor.key, key) {
-		return zeroLevelPredecessor.value, nil
+		return clone(zeroLevelPredecessorSuccessor.value), nil
 	}
 
 	return nil, ErrNotFound
@@ -183,7 +214,8 @@ func (s *SkipList) Delete(key []byte) error {
 			continue
 		}
 
-		if levelPredecessor == s.head && node.next[level] == nil {
+		// level > 0 - so we always keep 0th level
+		if levelPredecessor == s.head && node.next[level] == nil && level > 0 {
 			s.removeHighestLevel()
 		} else {
 			removeAfter(levelPredecessor, node, level)
@@ -198,10 +230,33 @@ func (s *SkipList) Delete(key []byte) error {
 // Если start == nil, считается -∞ (начало списка).
 // Если end == nil, считается +∞ (конец списка).
 func (s *SkipList) Scan(start, end []byte) (Iterator, error) {
-	_ = s
-	_ = start
-	_ = end
-	return nil, ErrNotImplemented
+	if start != nil && end != nil && keysCompare(start, end) >= 0 {
+		return &SkipListIterator{current: nil, end: nil}, nil
+	}
+
+	zeroLevel := 0
+
+	var startNode *Node
+	if start == nil {
+		startNode = s.head.next[zeroLevel]
+	} else {
+		startPredecessors := s.findPredecessors(start)
+		zeroLevelStartPredecessor := startPredecessors[zeroLevel]
+		zeroLevelStartPredecessorSuccessor := zeroLevelStartPredecessor.next[zeroLevel]
+		startNode = zeroLevelStartPredecessorSuccessor
+	}
+
+	var endNode *Node
+	if end == nil {
+		endNode = nil
+	} else {
+		endPredecessors := s.findPredecessors(end)
+		zeroLevelEndPredecessor := endPredecessors[zeroLevel]
+		zeroLevelEndPredecessorSuccessor := zeroLevelEndPredecessor.next[zeroLevel]
+		endNode = zeroLevelEndPredecessorSuccessor
+	}
+
+	return &SkipListIterator{current: startNode, end: endNode}, nil
 }
 
 func (s *SkipList) GetRepresentation() string {
