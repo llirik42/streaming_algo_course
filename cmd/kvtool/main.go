@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
-	"runtime"
 	"time"
 
 	"kvschool/internal/kv"
@@ -16,10 +15,6 @@ import (
 	"kvschool/internal/mapreduce"
 	"kvschool/internal/testutil"
 )
-
-type Options struct {
-	skipListProbability float64
-}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -68,7 +63,7 @@ func runWordCount(args []string) error {
 	}
 
 	ctx := context.Background()
-	st, err := initStore(*storeKind, &Options{})
+	st, err := initStore(*storeKind)
 	if err != nil {
 		return err
 	}
@@ -108,19 +103,15 @@ func runLoad(args []string) error {
 	count := fs.Int("count", 10000, "количество операций")
 	zipf := fs.Float64("zipf", 0, "параметр s для Zipf (0 для равномерного, >1.0 для перекошенного)")
 	storeKind := fs.String("store", "memmap", "тип хранилища: memmap|skiplist|lsm")
-	probability := fs.Float64("probability", 0.5, "вероятность подняться на уровень выше в skiplist")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	st, err := initStore(*storeKind, &Options{skipListProbability: *probability})
+	st, err := initStore(*storeKind)
 	if err != nil {
 		return err
 	}
 	defer st.Close()
-
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
 
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 	var keyGen testutil.KeyGenerator
@@ -149,27 +140,16 @@ func runLoad(args []string) error {
 	}
 
 	dur := time.Since(start)
-	fmt.Println(*probability)
-	fmt.Println(dur)
-	fmt.Println(m.Alloc)
-	fmt.Println(m.TotalAlloc)
-	fmt.Println(m.Sys)
-	fmt.Println(m.HeapAlloc)
-	fmt.Println(m.Mallocs)
-	fmt.Println(m.StackSys)
-
+	fmt.Printf("Выполнено %d операций за %v (%.1f op/s)\n", *count, dur, float64(*count)/dur.Seconds())
 	return nil
 }
 
-func initStore(kind string, options *Options) (kv.Store, error) {
+func initStore(kind string) (kv.Store, error) {
 	switch kind {
 	case "memmap":
 		return memmap.New(), nil
 	case "skiplist":
 		return memSkipListDefault(), nil
-	case "skiplist-probability":
-		fmt.Printf("init skiplist with %f probability\n", options.skipListProbability)
-		return memSkipListProbability(options.skipListProbability)
 	// case "lsm": будет добавлен в процессе выполнения заданий
 	default:
 		return nil, fmt.Errorf("неизвестное хранилище %q", kind)

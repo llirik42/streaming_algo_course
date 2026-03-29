@@ -57,7 +57,7 @@ func (s *SkipList) Put(key, value []byte) error {
 	zeroLevelPredecessorSuccessor := zeroLevelPredecessor.next[zeroLevel]
 
 	if zeroLevelPredecessorSuccessor != nil && keysEqual(zeroLevelPredecessorSuccessor.key, key) {
-		zeroLevelPredecessor.value = value
+		zeroLevelPredecessorSuccessor.value = value
 		return nil
 	}
 
