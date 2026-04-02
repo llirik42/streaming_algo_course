@@ -25,7 +25,7 @@ func (s *SkipListIterator) Next() (key, value []byte, ok bool, err error) {
 	zeroLevel := 0
 	s.current = s.current.next[zeroLevel]
 
-	return node.key, node.value, true, nil
+	return cloneBytes(node.key), cloneBytes(node.value), true, nil
 }
 
 func (s *SkipListIterator) Close() error {
