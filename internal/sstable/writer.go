@@ -87,7 +87,9 @@ func (w *Writer) Add(key []byte, value []byte) error {
 }
 
 func (w *Writer) Close() error {
-	w.blocks[len(w.blocks)-1].lastKeyIndex = w.previousIndex
+	if len(w.blocks) > 0 {
+		w.blocks[len(w.blocks)-1].lastKeyIndex = w.previousIndex
+	}
 
 	if err := w.writeFooter(); err != nil {
 		return fmt.Errorf("sstable close: failed to write footer: %w", err)
@@ -197,6 +199,7 @@ func (w *Writer) writeBlocksInfo() error {
 
 func (w *Writer) writeChecksum() error {
 	checkSum := w.hash.Sum(nil)
+	
 	checkSumLength := len(checkSum)
 
 	n, err := w.ioWriter.Write(checkSum)

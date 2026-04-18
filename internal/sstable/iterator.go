@@ -34,7 +34,7 @@ func (it *Iterator) Next() (key, value []byte, ok bool, err error) {
 		it.index = nextIndex
 	}
 
-	return key, nil, true, nil
+	return key, value, true, nil
 }
 
 func (it *Iterator) Close() error {

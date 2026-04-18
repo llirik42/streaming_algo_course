@@ -7,7 +7,7 @@ test-day1:
 	go test -tags=day1 ./... -count=1
 
 test-day2:
-	go test -tags=day2 ./...
+	go test -tags=day2 ./... -count=1
 
 test-day3:
 	go test -tags=day3 ./...

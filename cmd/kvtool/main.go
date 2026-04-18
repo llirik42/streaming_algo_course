@@ -39,7 +39,7 @@ func write() {
 	writer := sstable.NewWriter(file)
 	defer writer.Close()
 
-	for i := 0; i < 10000000; i++ {
+	for i := 0; i < 1000; i++ {
 		//value := generateRandomString()
 
 		value := fmt.Sprintf("value-%d", i+1)
@@ -61,11 +61,34 @@ func read() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	
-	_, err = sstable.NewReader(file, info.Size())
+
+	r, err := sstable.NewReader(file, info.Size())
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	it, err := r.Iterator(nil, nil)
+	defer it.Close()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for {
+		key, value, ok, err := it.Next()
+		if err != nil {
+			log.Fatal(err)
+			break
+		}
+		if !ok {
+			break
+		}
+
+		fmt.Printf("%s:%s\n", key, value)
+	}
 }
 
 func main() {
-	//write()
+	write()
 	read()
+
 }

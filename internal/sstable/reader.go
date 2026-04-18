@@ -190,6 +190,16 @@ func (r *Reader) readBytes(offset int64, count int) ([]byte, int64, error) {
 // Iterator возвращает упорядоченную итерацию по диапазону [start, end).
 // Использует Sparse Index, чтобы найти нужный блок данных.
 func (r *Reader) Iterator(start []byte, end []byte) (*Iterator, error) {
+	if len(r.blocksInfo) == 0 {
+		return &Iterator{
+			reader:                   r,
+			index:                    -1,
+			endIndex:                 -1,
+			currentBlockLastKeyIndex: -1,
+			currentBlockIndex:        -1,
+		}, nil
+	}
+
 	//if len(r.blocksInfo) == 0 {
 	//	return &Iterator{
 	//		reader:                   r,
