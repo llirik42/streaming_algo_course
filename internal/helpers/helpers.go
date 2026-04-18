@@ -1,6 +1,12 @@
 package helpers
 
-import "bytes"
+import (
+	"bytes"
+)
+
+func StringToBytes(s string) []byte {
+	return []byte(s)
+}
 
 func CloneBytes(b []byte) []byte {
 	if b == nil {

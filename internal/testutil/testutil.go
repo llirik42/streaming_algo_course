@@ -58,3 +58,17 @@ func (z *ZipfGenerator) Next() []byte {
 	idx := z.Zipf.Uint64()
 	return append([]byte(nil), z.Items[idx]...) // copy
 }
+
+func GenerateRandomStringFixed(length int, rng *rand.Rand) string {
+	charset := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	result := make([]byte, length)
+	for i := range result {
+		result[i] = charset[rng.Intn(len(charset))]
+	}
+	return string(result)
+}
+
+func GenerateRandomString(maxLength int, rng *rand.Rand) string {
+	length := rng.Int31n(int32(maxLength + 1))
+	return GenerateRandomStringFixed(int(length), rng)
+}
