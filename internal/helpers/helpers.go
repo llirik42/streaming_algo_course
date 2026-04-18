@@ -1,8 +1,8 @@
-package skiplist
+package helpers
 
 import "bytes"
 
-func cloneBytes(b []byte) []byte {
+func CloneBytes(b []byte) []byte {
 	if b == nil {
 		return nil
 	}
@@ -11,10 +11,10 @@ func cloneBytes(b []byte) []byte {
 	return out
 }
 
-func keysEqual(key1, key2 []byte) bool {
+func KeysEqual(key1, key2 []byte) bool {
 	return bytes.Equal(key1, key2)
 }
 
-func keysCompare(key1, key2 []byte) int {
+func CompareKeys(key1, key2 []byte) int {
 	return bytes.Compare(key1, key2)
 }
