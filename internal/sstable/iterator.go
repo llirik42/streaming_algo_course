@@ -6,8 +6,27 @@ type Iterator struct {
 	reader                   *Reader
 	index                    int64
 	endIndex                 int64
+	currentBlockIndex        int64
 	currentBlockLastKeyIndex int64
-	currentBlockIndex        int
+}
+
+func NewIterator(reader *Reader, startIndex, endIndex, startBlockIndex int64) *Iterator {
+	var currentBlockLastKeyIndex int64
+
+	if startBlockIndex < 0 {
+		// Чтобы позволить подавать currentBlockLastKeyIndex=-1 для крайнего случая, когда 0 блоков
+		currentBlockLastKeyIndex = -1
+	} else {
+		currentBlockLastKeyIndex = reader.blocks[startBlockIndex].lastKeyIndex
+	}
+
+	return &Iterator{
+		reader:                   reader,
+		index:                    startIndex,
+		endIndex:                 endIndex,
+		currentBlockLastKeyIndex: currentBlockLastKeyIndex,
+		currentBlockIndex:        startBlockIndex,
+	}
 }
 
 func (it *Iterator) Next() (key, value []byte, ok bool, err error) {
@@ -17,16 +36,16 @@ func (it *Iterator) Next() (key, value []byte, ok bool, err error) {
 
 	key, value, nextIndex, err := it.reader.readRecord(it.index, true)
 	if err != nil {
-		return nil, nil, false, fmt.Errorf("sstable iterator: failed to read record: %w", err)
+		return nil, nil, false, fmt.Errorf("sstable iterator next: failed to read record: %w", err)
 	}
 
 	if it.index == it.currentBlockLastKeyIndex {
 		// текущий блок не последний
-		if it.currentBlockIndex+1 < len(it.reader.blocksInfo) {
+		if it.currentBlockIndex+1 < int64(len(it.reader.blocks)) {
 			it.currentBlockIndex++
-			currentBlock := it.reader.blocksInfo[it.currentBlockIndex]
-			it.index = int64(currentBlock.firstKeyIndex)
-			it.currentBlockLastKeyIndex = int64(currentBlock.lastKeyIndex)
+			currentBlock := it.reader.blocks[it.currentBlockIndex]
+			it.index = currentBlock.firstKeyIndex
+			it.currentBlockLastKeyIndex = currentBlock.lastKeyIndex
 		} else {
 			it.index = -1 // дальше блоков нет
 		}

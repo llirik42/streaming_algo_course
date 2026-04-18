@@ -2,6 +2,7 @@ package sstable
 
 import (
 	"bytes"
+	"fmt"
 	"math/rand"
 	"testing"
 
@@ -75,7 +76,7 @@ func TestSSTable_SimpleWriterReader(t *testing.T) {
 			t.Fatal(err)
 		}
 		if !ok {
-			t.Errorf("iterator.Next() returned ok=%t", ok)
+			t.Errorf("iterator.Next() %d returned ok=%t", i, ok)
 		}
 
 		if !KeysEqual(key, expectedKeys[i]) {
@@ -159,5 +160,101 @@ func TestSSTable_IteratorClose(t *testing.T) {
 	_, _, ok, _ = iterator.Next()
 	if ok {
 		t.Errorf("iterator.Next() returned ok=%t", ok)
+	}
+}
+
+func TestSSTable_IteratorRangeSmall(t *testing.T) {
+	buffer := bytes.NewBuffer(nil)
+
+	writer := NewWriter(buffer)
+
+	for i := 300; i <= 800; i += 10 {
+		key := StringToBytes(fmt.Sprintf("key-%d", i))
+		value := StringToBytes(fmt.Sprintf("value-%d", i))
+		if err := writer.Add(key, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reader, err := NewReader(bytes.NewReader(buffer.Bytes()), int64(buffer.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []TestCase{
+		{nil, nil, 300, 800},
+		{StringToBytes(fmt.Sprintf("key-300")), nil, 300, 800},
+		{StringToBytes(fmt.Sprintf("key-299")), nil, 300, 800},
+		{StringToBytes(fmt.Sprintf("key-301")), nil, 310, 800},
+		{nil, StringToBytes(fmt.Sprintf("key-800")), 300, 790},
+		{nil, StringToBytes(fmt.Sprintf("key-801")), 300, 800},
+		{nil, StringToBytes(fmt.Sprintf("key-799")), 300, 790},
+		{StringToBytes(fmt.Sprintf("key-300")), StringToBytes(fmt.Sprintf("key-800")), 300, 790},
+		{StringToBytes(fmt.Sprintf("key-400")), StringToBytes(fmt.Sprintf("key-700")), 400, 690},
+	}
+
+	for i, c := range cases {
+		startKey := c.StartKey
+		endKey := c.EndKey
+		startNumber := c.StartNumber
+		endNumber := c.EndNumber
+
+		it, err := reader.Iterator(startKey, endKey)
+		if err != nil {
+			t.Fatalf("Iterator %d: %v", err, i)
+		}
+
+		TestIterator(t, it, startNumber, endNumber+1, 10)
+	}
+}
+
+func TestSSTable_IteratorRangeLarge(t *testing.T) {
+	buffer := bytes.NewBuffer(nil)
+
+	writer := NewWriter(buffer)
+
+	for i := 30000; i <= 80000; i += 10 {
+		key := StringToBytes(fmt.Sprintf("key-%d", i))
+		value := StringToBytes(fmt.Sprintf("value-%d", i))
+		if err := writer.Add(key, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reader, err := NewReader(bytes.NewReader(buffer.Bytes()), int64(buffer.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []TestCase{
+		{nil, nil, 30000, 80000},
+		{StringToBytes(fmt.Sprintf("key-30000")), nil, 30000, 80000},
+		{StringToBytes(fmt.Sprintf("key-20099")), nil, 30000, 80000},
+		{StringToBytes(fmt.Sprintf("key-30001")), nil, 30010, 80000},
+		{nil, StringToBytes(fmt.Sprintf("key-80000")), 30000, 79990},
+		{nil, StringToBytes(fmt.Sprintf("key-80001")), 30000, 80000},
+		{nil, StringToBytes(fmt.Sprintf("key-70099")), 30000, 70090},
+		{StringToBytes(fmt.Sprintf("key-30000")), StringToBytes(fmt.Sprintf("key-80000")), 30000, 79990},
+		{StringToBytes(fmt.Sprintf("key-40000")), StringToBytes(fmt.Sprintf("key-70000")), 40000, 69990},
+	}
+
+	for i, c := range cases {
+		startKey := c.StartKey
+		endKey := c.EndKey
+		startNumber := c.StartNumber
+		endNumber := c.EndNumber
+
+		it, err := reader.Iterator(startKey, endKey)
+		if err != nil {
+			t.Fatalf("Iterator %d: %v", err, i)
+		}
+
+		TestIterator(t, it, startNumber, endNumber+1, 10)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	. "kvschool/internal/helpers"
 	"kvschool/internal/iterator"
+	. "kvschool/internal/testutil"
 	"testing"
 )
 
@@ -276,43 +277,6 @@ func TestSkipList_ScanMultiple(t *testing.T) {
 		}
 	}
 
-	type TestCase struct {
-		StartKey    []byte
-		EndKey      []byte
-		StartNumber int
-		EndNumber   int
-	}
-
-	testIterator := func(it iterator.Iterator, expectedStart, expectedEnd int) {
-		for i := expectedStart; i <= expectedEnd; i++ {
-			expectedKey := StringToBytes(fmt.Sprintf("key-%d", i))
-			expectedValue := StringToBytes(fmt.Sprintf("value-%d", i))
-			k, v, ok, err := it.Next()
-			if err != nil {
-				t.Fatalf("Next: %v", err)
-			}
-			if !ok {
-				t.Fatalf("Next: expected ok, got not ok on %d", i)
-			}
-			if !bytes.Equal(k, expectedKey) {
-				t.Fatalf("Next: expected key %s, got %s on %d", expectedKey, k, i)
-			}
-			if !bytes.Equal(v, expectedValue) {
-				t.Fatalf("Next: expected value %s, got %s on %d", expectedValue, v, i)
-			}
-		}
-		// Потому что 13 - несчастливое число
-		for i := 0; i < 13; i++ {
-			_, _, ok, err := it.Next()
-			if err != nil {
-				t.Fatalf("Next: %v", err)
-			}
-			if ok {
-				t.Fatalf("Next expected not ok, got ok on")
-			}
-		}
-	}
-
 	cases := []TestCase{
 		{nil, nil, 15, 90},
 		{StringToBytes(fmt.Sprintf("key-15")), nil, 15, 90},
@@ -336,7 +300,7 @@ func TestSkipList_ScanMultiple(t *testing.T) {
 			t.Fatalf("Scan %d: %v", err, i)
 		}
 
-		testIterator(it, startNumber, endNumber)
+		TestIterator(t, it, startNumber, endNumber+1, 1)
 	}
 }
 

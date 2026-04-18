@@ -39,7 +39,7 @@ func write() {
 	writer := sstable.NewWriter(file)
 	defer writer.Close()
 
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < 10; i++ {
 		//value := generateRandomString()
 
 		value := fmt.Sprintf("value-%d", i+1)
