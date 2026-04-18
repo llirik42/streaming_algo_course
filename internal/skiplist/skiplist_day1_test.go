@@ -5,6 +5,7 @@ package skiplist
 import (
 	"bytes"
 	"fmt"
+	"kvschool/internal/iterator"
 	"testing"
 )
 
@@ -155,7 +156,7 @@ func TestSkipList_ScanEmpty(t *testing.T) {
 	it3, err3 := sl.Scan(stringToBytes("key-1"), stringToBytes("key-2"))
 	it4, err4 := sl.Scan(nil, stringToBytes("key-2"))
 
-	iterators := []Iterator{it1, it2, it3, it4}
+	iterators := []iterator.Iterator{it1, it2, it3, it4}
 	errors := []error{err1, err2, err3, err4}
 
 	for i := 0; i < len(iterators); i++ {
@@ -215,13 +216,13 @@ func TestSkipList_ScanSingle(t *testing.T) {
 		}
 	}
 
-	iterators := []Iterator{
+	iterators := []iterator.Iterator{
 		it1, it2, it3, it4, it5, it6, it7, it8,
 		it9, it10, it11, it12, it13, it14, it15, it16,
 	}
 
 	nonEmptyIndexes := []int{1, 3, 4, 8, 10, 12}
-	nonEmptyIterators := make([]Iterator, 0)
+	nonEmptyIterators := make([]iterator.Iterator, 0)
 	for i := 0; i < 16; i++ {
 		for _, index := range nonEmptyIndexes {
 			if i == index {
@@ -279,7 +280,7 @@ func TestSkipList_ScanMultiple(t *testing.T) {
 		EndNumber   int
 	}
 
-	testIterator := func(it Iterator, expectedStart, expectedEnd int) {
+	testIterator := func(it iterator.Iterator, expectedStart, expectedEnd int) {
 		for i := expectedStart; i <= expectedEnd; i++ {
 			expectedKey := stringToBytes(fmt.Sprintf("key-%d", i))
 			expectedValue := stringToBytes(fmt.Sprintf("value-%d", i))

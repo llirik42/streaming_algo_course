@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"kvschool/internal/coinflipper"
 	"kvschool/internal/helpers"
+	"kvschool/internal/iterator"
 )
 
 // ErrNotFound означает отсутствие ключа (IMSI).
@@ -133,7 +134,7 @@ func (s *SkipList) Delete(key []byte) error {
 // Scan возвращает итератор по диапазону [start, end).
 // Если start == nil, считается -∞ (начало списка).
 // Если end == nil, считается +∞ (конец списка).
-func (s *SkipList) Scan(start, end []byte) (Iterator, error) {
+func (s *SkipList) Scan(start, end []byte) (iterator.Iterator, error) {
 	if start != nil && end != nil && helpers.CompareKeys(start, end) >= 0 {
 		return &Iterator{current: nil, end: nil}, nil
 	}
