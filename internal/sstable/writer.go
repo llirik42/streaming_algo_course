@@ -42,13 +42,10 @@ func (w *Writer) Add(key []byte, value []byte) error {
 
 	// в SSTable пока нет блоков
 	if !w.hasBlocks() {
-		newBlockSize := DiskBlockSize * uint64(math.Ceil(float64(recordSize)/float64(DiskBlockSize)))
-		w.blocksInfo = append(w.blocksInfo, &writerBlockInfo{nextBlockIndex: newBlockSize})
-
+		w.createBlock(recordSize, 0)
 		if err := w.writeRecord(key, value); err != nil {
 			return fmt.Errorf("sstable add: failed to write first record: %w", err)
 		}
-
 		return nil
 	}
 
@@ -56,29 +53,27 @@ func (w *Writer) Add(key []byte, value []byte) error {
 	nextBlockIndex := lastBlock.nextBlockIndex
 
 	if w.currentIndex+recordSize-1 < nextBlockIndex {
-		// Влазим в текущий блок, не создаём новый
+		// Новая запись помещается в текущий блок => новый не создаём
 		if err := w.writeRecord(key, value); err != nil {
 			return fmt.Errorf("sstable add: failed to write record to current block: %w", err)
 		}
-
 		return nil
 	}
 
-	// В текущий блок не влазим, создаём новый
-
 	// Обновляем последний существующий блок
-
 	lastBlock.lastKeyIndex = w.previousIndex
 
-	// Выравнивание до следующего блока
+	// Выравниваем до следующего блока
 	if err := w.align(nextBlockIndex - w.currentIndex); err != nil {
 		return fmt.Errorf("sstable add: failed to align next block: %w", err)
 	}
 
-	// создаём новый блок
-	newBlockSize := DiskBlockSize * uint64(math.Ceil(float64(recordSize)/float64(DiskBlockSize)))
-	w.blocksInfo = append(w.blocksInfo, &writerBlockInfo{firstKeyIndex: nextBlockIndex, nextBlockIndex: nextBlockIndex + newBlockSize})
+	// Создаём новый блок
+	w.createBlock(recordSize, nextBlockIndex)
+
+	// Помещаем указатель начала записи в начало нового блока
 	w.currentIndex = nextBlockIndex
+
 	if err := w.writeRecord(key, value); err != nil {
 		return fmt.Errorf("sstable add: failed to write record to new block: %w", err)
 	}
@@ -240,6 +235,17 @@ func (w *Writer) updateChecksum(key []byte, value []byte) error {
 	}
 
 	return nil
+}
+
+func (w *Writer) createBlock(initialRecordSize uint64, firstKeyIndex uint64) {
+	sizeMultiplier := math.Ceil(float64(initialRecordSize) / float64(DiskBlockSize))
+
+	newBlockSize := DiskBlockSize * uint64(sizeMultiplier)
+
+	w.blocksInfo = append(w.blocksInfo, &writerBlockInfo{
+		firstKeyIndex:  firstKeyIndex,
+		nextBlockIndex: firstKeyIndex + newBlockSize,
+	})
 }
 
 func (w *Writer) hasBlocks() bool {
