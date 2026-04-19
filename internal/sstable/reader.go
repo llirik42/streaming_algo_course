@@ -1,40 +1,38 @@
 package sstable
 
 import (
-	"encoding/binary"
 	"fmt"
 	"io"
 	. "kvschool/internal/helpers"
+)
+
+const (
+	NoIndex int64 = -1
 )
 
 type footer struct {
 	checksum []byte
 }
 
-type blockInfo struct {
+type readerBlockInfo struct {
 	firstKey      []byte
 	lastKey       []byte
 	firstKeyIndex int64
 	lastKeyIndex  int64
 }
 
-// Reader читает SSTable с диска.
-// Использует RandomAccess (io.ReaderAt) для прыжков по индексу.
 type Reader struct {
-	blocks       []*blockInfo
-	lastBlockKey []byte
-	footer       *footer
-	ioReader     io.ReaderAt
-	fileSize     int64
-	order        binary.ByteOrder
+	ioReader   io.ReaderAt
+	blocksInfo []*readerBlockInfo
+	footer     *footer
+	totalSize  int64
 }
 
-func NewReader(ioReader io.ReaderAt, fileSize int64) (*Reader, error) {
+func NewReader(ioReader io.ReaderAt, totalSize int64) (*Reader, error) {
 	reader := &Reader{
-		blocks:   make([]*blockInfo, 0),
-		ioReader: ioReader,
-		fileSize: fileSize,
-		order:    binary.LittleEndian,
+		blocksInfo: make([]*readerBlockInfo, 0),
+		ioReader:   ioReader,
+		totalSize:  totalSize,
 	}
 
 	if err := reader.readFooter(); err != nil {
@@ -83,13 +81,13 @@ func (r *Reader) readAllBlocksInfo() error {
 		}
 
 		offset = off
-		r.blocks = append(r.blocks, info)
+		r.blocksInfo = append(r.blocksInfo, info)
 	}
 
 	return nil
 }
 
-func (r *Reader) readBlockInfo(blockOffset int64) (*blockInfo, int64, error) {
+func (r *Reader) readBlockInfo(blockOffset int64) (*readerBlockInfo, int64, error) {
 	firstKeyIndex, off2, err := r.readUint64(blockOffset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("sstable readBlockInfo: failed to read block first key index: %w", err)
@@ -110,7 +108,7 @@ func (r *Reader) readBlockInfo(blockOffset int64) (*blockInfo, int64, error) {
 		return nil, 0, fmt.Errorf("sstable readBlockInfo: failed to read block last key: %w", err)
 	}
 
-	return &blockInfo{
+	return &readerBlockInfo{
 		firstKey:      firstKey,
 		lastKey:       lastKey,
 		firstKeyIndex: int64(firstKeyIndex),
@@ -119,7 +117,7 @@ func (r *Reader) readBlockInfo(blockOffset int64) (*blockInfo, int64, error) {
 }
 
 func (r *Reader) getChecksumLengthOffset() int64 {
-	return r.fileSize - 4
+	return r.totalSize - 4
 }
 
 func (r *Reader) getChecksumOffset(checksumLength int64) int64 {
@@ -169,7 +167,7 @@ func (r *Reader) readUint32(offset int64) (uint32, int64, error) {
 		return 0, newOffset, fmt.Errorf("sstable readUint32: reading bytes: %w", err)
 	}
 
-	return r.order.Uint32(buffer), newOffset, nil
+	return ByteOrder.Uint32(buffer), newOffset, nil
 }
 
 func (r *Reader) readUint64(offset int64) (uint64, int64, error) {
@@ -179,7 +177,7 @@ func (r *Reader) readUint64(offset int64) (uint64, int64, error) {
 		return 0, newOffset, fmt.Errorf("sstable readUint64: reading bytes: %w", err)
 	}
 
-	return r.order.Uint64(buffer), newOffset, nil
+	return ByteOrder.Uint64(buffer), newOffset, nil
 }
 
 func (r *Reader) readBytes(offset int64, count int) ([]byte, int64, error) {
@@ -199,23 +197,23 @@ func (r *Reader) readBytes(offset int64, count int) ([]byte, int64, error) {
 // Iterator возвращает упорядоченную итерацию по диапазону [start, end).
 // Использует Sparse Index, чтобы найти нужный блок данных.
 func (r *Reader) Iterator(start []byte, end []byte) (*Iterator, error) {
-	emptyIterator := NewIterator(r, -1, -1, -1)
+	emptyIterator := NewIterator(r, NoIndex, NoIndex, NoIndex)
 
-	if len(r.blocks) == 0 {
+	if len(r.blocksInfo) == 0 {
 		return emptyIterator, nil
 	}
 
 	if start == nil && end == nil {
 		firstBlockIndex := 0
-		return NewIterator(r, r.blocks[firstBlockIndex].firstKeyIndex, -1, int64(firstBlockIndex)), nil
+		return NewIterator(r, r.blocksInfo[firstBlockIndex].firstKeyIndex, NoIndex, int64(firstBlockIndex)), nil
 	}
 
 	if start != nil && end != nil && CompareKeys(start, end) >= 0 {
 		return emptyIterator, nil
 	}
 
-	firstBlock := r.blocks[0]
-	lastBlock := r.blocks[len(r.blocks)-1]
+	firstBlock := r.blocksInfo[0]
+	lastBlock := r.blocksInfo[len(r.blocksInfo)-1]
 
 	if start != nil && CompareKeys(lastBlock.lastKey, start) < 0 {
 		return emptyIterator, nil
@@ -225,8 +223,8 @@ func (r *Reader) Iterator(start []byte, end []byte) (*Iterator, error) {
 		return emptyIterator, nil
 	}
 
-	if len(r.blocks) == 1 {
-		block := r.blocks[0]
+	if len(r.blocksInfo) == 1 {
+		block := r.blocksInfo[0]
 
 		var startIndex int64
 		if start == nil {
@@ -241,10 +239,10 @@ func (r *Reader) Iterator(start []byte, end []byte) (*Iterator, error) {
 
 		var endIndex int64
 		if end == nil {
-			endIndex = -1
+			endIndex = NoIndex
 		} else {
 			if CompareKeys(block.lastKey, end) < 0 {
-				endIndex = -1
+				endIndex = NoIndex
 			} else {
 				index, err := r.findFirstGreaterOrEqual(block, end)
 				if err != nil {
@@ -267,11 +265,11 @@ func (r *Reader) Iterator(start []byte, end []byte) (*Iterator, error) {
 
 		// i1 и i2 - 2 кандидата (блока)
 		var blockIndex1 int64 = 0
-		blockIndex2 := int64(len(r.blocks)) - 1
+		blockIndex2 := int64(len(r.blocksInfo)) - 1
 
 		for blockIndex2-blockIndex1 > 1 {
 			middleIndex := (blockIndex1 + blockIndex2) / 2
-			middleBlock := r.blocks[middleIndex]
+			middleBlock := r.blocksInfo[middleIndex]
 
 			if CompareKeys(middleBlock.lastKey, start) >= 0 {
 				blockIndex2 = middleIndex
@@ -280,8 +278,8 @@ func (r *Reader) Iterator(start []byte, end []byte) (*Iterator, error) {
 			}
 		}
 
-		block1 := r.blocks[blockIndex1]
-		block2 := r.blocks[blockIndex2]
+		block1 := r.blocksInfo[blockIndex1]
+		block2 := r.blocksInfo[blockIndex2]
 
 		if CompareKeys(block1.lastKey, start) >= 0 {
 			index, err := r.findFirstGreaterOrEqual(block1, start)
@@ -302,17 +300,17 @@ func (r *Reader) Iterator(start []byte, end []byte) (*Iterator, error) {
 
 	var endIndex int64
 	if end == nil {
-		endIndex = -1
+		endIndex = NoIndex
 	} else {
 		// Бинарный поиск для поиска блока, в котором содержится первый ключ, меньший end
 
 		// i1 и i2 - 2 кандидата (блока)
 		blockIndex1 := 0
-		blockIndex2 := len(r.blocks) - 1
+		blockIndex2 := len(r.blocksInfo) - 1
 
 		for blockIndex2-blockIndex1 > 1 {
 			middleIndex := (blockIndex1 + blockIndex2) / 2
-			middleBlock := r.blocks[middleIndex]
+			middleBlock := r.blocksInfo[middleIndex]
 
 			if CompareKeys(middleBlock.firstKey, end) < 0 {
 				blockIndex1 = middleIndex
@@ -321,11 +319,11 @@ func (r *Reader) Iterator(start []byte, end []byte) (*Iterator, error) {
 			}
 		}
 
-		block1 := r.blocks[blockIndex1]
-		block2 := r.blocks[blockIndex2]
+		block1 := r.blocksInfo[blockIndex1]
+		block2 := r.blocksInfo[blockIndex2]
 
 		if CompareKeys(block2.lastKey, end) < 0 {
-			endIndex = -1
+			endIndex = NoIndex
 		} else if CompareKeys(block2.firstKey, end) < 0 {
 			index, err := r.findFirstGreaterOrEqual(block2, end)
 			if err != nil {
@@ -344,7 +342,7 @@ func (r *Reader) Iterator(start []byte, end []byte) (*Iterator, error) {
 	return NewIterator(r, startIndex, endIndex, startBlockIndex), nil
 }
 
-func (r *Reader) findFirstGreaterOrEqual(block *blockInfo, target []byte) (int64, error) {
+func (r *Reader) findFirstGreaterOrEqual(block *readerBlockInfo, target []byte) (int64, error) {
 	var offset = block.firstKeyIndex
 
 	for {
@@ -364,12 +362,12 @@ func (r *Reader) findFirstGreaterOrEqual(block *blockInfo, target []byte) (int64
 		offset = nextOffset
 	}
 
-	return -1, nil
+	return NoIndex, nil
 }
 
-func (r *Reader) findLastLessEqual(block *blockInfo, target []byte) (int64, error) {
+func (r *Reader) findLastLessEqual(block *readerBlockInfo, target []byte) (int64, error) {
 	var offset = block.firstKeyIndex
-	var lastIndex int64 = -1
+	var lastIndex int64 = NoIndex
 
 	for {
 		key, _, nextOffset, err := r.readRecord(offset, true)
