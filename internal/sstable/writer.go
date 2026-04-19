@@ -41,7 +41,7 @@ func (w *Writer) Add(key []byte, value []byte) error {
 	recordSize := w.calculateRecordSize(key, value)
 
 	// в SSTable пока нет блоков
-	if uint64(len(w.blocksInfo)) == 0 {
+	if !w.hasBlocks() {
 		newBlockSize := DiskBlockSize * uint64(math.Ceil(float64(recordSize)/float64(DiskBlockSize)))
 		w.blocksInfo = append(w.blocksInfo, &writerBlockInfo{nextBlockIndex: newBlockSize})
 
@@ -52,7 +52,8 @@ func (w *Writer) Add(key []byte, value []byte) error {
 		return nil
 	}
 
-	nextBlockIndex := w.blocksInfo[len(w.blocksInfo)-1].nextBlockIndex
+	lastBlock := w.getLastBlock()
+	nextBlockIndex := lastBlock.nextBlockIndex
 
 	if w.currentIndex+recordSize-1 < nextBlockIndex {
 		// Влазим в текущий блок, не создаём новый
@@ -66,7 +67,8 @@ func (w *Writer) Add(key []byte, value []byte) error {
 	// В текущий блок не влазим, создаём новый
 
 	// Обновляем последний существующий блок
-	w.blocksInfo[len(w.blocksInfo)-1].lastKeyIndex = w.previousIndex
+
+	lastBlock.lastKeyIndex = w.previousIndex
 
 	// Выравнивание до следующего блока
 	if err := w.align(nextBlockIndex - w.currentIndex); err != nil {
@@ -85,8 +87,9 @@ func (w *Writer) Add(key []byte, value []byte) error {
 }
 
 func (w *Writer) Close() error {
-	if len(w.blocksInfo) > 0 {
-		w.blocksInfo[len(w.blocksInfo)-1].lastKeyIndex = w.previousIndex
+	if w.hasBlocks() {
+		// Завершаем последний блок
+		w.getLastBlock().lastKeyIndex = w.previousIndex
 	}
 
 	if err := w.writeFooter(); err != nil {
@@ -96,56 +99,24 @@ func (w *Writer) Close() error {
 	return nil
 }
 
-func (w *Writer) calculateRecordSize(key, value []byte) uint64 {
-	return uint64(8 + len(key) + len(value))
-}
-
 func (w *Writer) writeRecord(key, value []byte) error {
 	keyLength := len(key)
 	valueLength := len(value)
 
-	ioWriter := w.ioWriter
-	if err := binary.Write(ioWriter, ByteOrder, uint32(keyLength)); err != nil {
+	if err := w.writeUint32(uint32(keyLength)); err != nil {
 		return fmt.Errorf("sstable writeRecord: write key length: %w", err)
 	}
-	if err := binary.Write(ioWriter, ByteOrder, uint32(valueLength)); err != nil {
+	if err := w.writeUint32(uint32(valueLength)); err != nil {
 		return fmt.Errorf("sstable writeRecord: write value length: %w", err)
 	}
-
-	var n int
-	var err error
-
-	n, err = ioWriter.Write(key)
-	if err != nil {
+	if err := w.writeBytes(key); err != nil {
 		return fmt.Errorf("sstable add: write key: %w", err)
 	}
-	if n < keyLength {
-		return fmt.Errorf("sstable writeRecord: write key: %d < %d", n, keyLength)
+	if err := w.writeBytes(value); err != nil {
+		return fmt.Errorf("sstable add: write value: %w", err)
 	}
-
-	n, err = ioWriter.Write(value)
-	if err != nil {
-		return fmt.Errorf("sstable writeRecord: write value: %w", err)
-	}
-	if n < valueLength {
-		return fmt.Errorf("sstable writeRecord: write value: %d < %d", n, valueLength)
-	}
-
-	// Для хеша
-	n, err = w.checksumHash.Write(key)
-	if err != nil {
-		return fmt.Errorf("sstable writeRecord: write key for hash: %w", err)
-	}
-	if n < keyLength {
-		return fmt.Errorf("sstable writeRecord: write key for hash: %d < %d", n, valueLength)
-	}
-
-	n, err = w.checksumHash.Write(value)
-	if err != nil {
-		return fmt.Errorf("sstable writeRecord: write value for hash: %w", err)
-	}
-	if n < valueLength {
-		return fmt.Errorf("sstable writeRecord: write value for hash: %d < %d", n, valueLength)
+	if err := w.updateChecksum(key, value); err != nil {
+		return fmt.Errorf("sstable add: updating checksum: %w", err)
 	}
 
 	w.previousIndex = w.currentIndex
@@ -167,20 +138,19 @@ func (w *Writer) writeFooter() error {
 }
 
 func (w *Writer) writeBlocksInfo() error {
-	ioWriter := w.ioWriter
-
-	// для каждого блока пишем индекс первого и последнего ключа
+	// Для каждого блока пишем индекс первого и последнего ключа
 	for _, block := range w.blocksInfo {
-		if err := binary.Write(ioWriter, ByteOrder, block.firstKeyIndex); err != nil {
+		if err := w.writeUint64(block.firstKeyIndex); err != nil {
 			return fmt.Errorf("sstable writeBlocksInfo: write first key index: %w", err)
 		}
-		if err := binary.Write(ioWriter, ByteOrder, block.lastKeyIndex); err != nil {
+		if err := w.writeUint64(block.lastKeyIndex); err != nil {
 			return fmt.Errorf("sstable writeBlocksInfo: write last key index: %w", err)
 		}
 	}
 
 	// Пишем Количество блоков
-	if err := binary.Write(ioWriter, ByteOrder, uint64(len(w.blocksInfo))); err != nil {
+	blocksNumber := w.getBlocksNumber()
+	if err := w.writeUint64(uint64(blocksNumber)); err != nil {
 		return fmt.Errorf("sstable writeBlocksInfo: write blocks number: %w", err)
 	}
 
@@ -188,26 +158,57 @@ func (w *Writer) writeBlocksInfo() error {
 }
 
 func (w *Writer) writeChecksum() error {
-	checkSum := w.checksumHash.Sum(nil)
+	checksum := w.checksumHash.Sum(nil)
+	checksumLength := len(checksum)
 
-	checkSumLength := len(checkSum)
-
-	n, err := w.ioWriter.Write(checkSum)
-	if err != nil {
+	if err := w.writeBytes(checksum); err != nil {
 		return fmt.Errorf("sstable writeChecksum: checksum: %w", err)
 	}
-	if n < checkSumLength {
-		return fmt.Errorf("sstable writeChecksum: checksum: %d < %d", n, checkSumLength)
-	}
-
-	if err := binary.Write(w.ioWriter, ByteOrder, uint32(checkSumLength)); err != nil {
+	if err := w.writeUint32(uint32(checksumLength)); err != nil {
 		return fmt.Errorf("sstable writeChecksum: checksum length: %w", err)
 	}
 
 	return nil
 }
 
+func (w *Writer) writeUint32(value uint32) error {
+	if err := binary.Write(w.ioWriter, ByteOrder, value); err != nil {
+		return fmt.Errorf("sstable writeUint32: %w", err)
+	}
+
+	return nil
+}
+
+func (w *Writer) writeUint64(value uint64) error {
+	if err := binary.Write(w.ioWriter, ByteOrder, value); err != nil {
+		return fmt.Errorf("sstable writeUint64: %w", err)
+	}
+
+	return nil
+}
+
+func (w *Writer) writeBytes(buffer []byte) error {
+	length := len(buffer)
+	n, err := w.ioWriter.Write(buffer)
+
+	if err != nil {
+		return fmt.Errorf("sstable writeBytes: %w", err)
+	}
+
+	if n < length {
+		return fmt.Errorf("sstable writeBytes: %d < %d", n, length)
+	}
+
+	return nil
+}
+
+func (w *Writer) calculateRecordSize(key, value []byte) uint64 {
+	// 8 = 4 + 4 (uint32s для длины ключа и значения)
+	return uint64(8 + len(key) + len(value))
+}
+
 func (w *Writer) align(alignment uint64) error {
+	// Выравнивание
 	n, err := w.ioWriter.Write(make([]byte, alignment))
 	if err != nil {
 		return fmt.Errorf("sstable align: %w", err)
@@ -215,6 +216,44 @@ func (w *Writer) align(alignment uint64) error {
 	if uint64(n) < alignment {
 		return fmt.Errorf("sstable align: %d < %d", n, alignment)
 	}
+	return nil
+}
+
+func (w *Writer) updateChecksum(key []byte, value []byte) error {
+	var n int
+	var err error
+
+	n, err = w.checksumHash.Write(key)
+	if err != nil {
+		return fmt.Errorf("sstable writeRecord: write key for hash: %w", err)
+	}
+	if n < len(key) {
+		return fmt.Errorf("sstable writeRecord: write key for hash: %d < %d", n, len(key))
+	}
+
+	n, err = w.checksumHash.Write(value)
+	if err != nil {
+		return fmt.Errorf("sstable writeRecord: write value for hash: %w", err)
+	}
+	if n < len(value) {
+		return fmt.Errorf("sstable writeRecord: write value for hash: %d < %d", n, len(value))
+	}
 
 	return nil
+}
+
+func (w *Writer) hasBlocks() bool {
+	return len(w.blocksInfo) > 0
+}
+
+func (w *Writer) getBlocksNumber() int {
+	return len(w.blocksInfo)
+}
+
+func (w *Writer) getFirstBlock() *writerBlockInfo {
+	return w.blocksInfo[0]
+}
+
+func (w *Writer) getLastBlock() *writerBlockInfo {
+	return w.blocksInfo[len(w.blocksInfo)-1]
 }
