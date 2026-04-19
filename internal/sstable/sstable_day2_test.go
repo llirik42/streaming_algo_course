@@ -185,12 +185,12 @@ func TestSSTable_IteratorRangeSmall(t *testing.T) {
 	}
 
 	cases := []TestCase{
-		//{nil, nil, 300, 800},
-		//{StringToBytes(fmt.Sprintf("key-300")), nil, 300, 800},
-		//{StringToBytes(fmt.Sprintf("key-299")), nil, 300, 800},
-		//{StringToBytes(fmt.Sprintf("key-301")), nil, 310, 800},
+		{nil, nil, 300, 800},
+		{StringToBytes(fmt.Sprintf("key-300")), nil, 300, 800},
+		{StringToBytes(fmt.Sprintf("key-299")), nil, 300, 800},
+		{StringToBytes(fmt.Sprintf("key-301")), nil, 310, 800},
 		{nil, StringToBytes(fmt.Sprintf("key-800")), 300, 790},
-		//{nil, StringToBytes(fmt.Sprintf("key-801")), 300, 800},
+		{nil, StringToBytes(fmt.Sprintf("key-801")), 300, 800},
 		{nil, StringToBytes(fmt.Sprintf("key-799")), 300, 790},
 		{StringToBytes(fmt.Sprintf("key-300")), StringToBytes(fmt.Sprintf("key-800")), 300, 790},
 		{StringToBytes(fmt.Sprintf("key-400")), StringToBytes(fmt.Sprintf("key-700")), 400, 690},

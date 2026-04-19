@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	DiskBlockSize uint64 = 256
+	DiskBlockSize uint64 = 4096
 )
 
 var ByteOrder binary.ByteOrder = binary.LittleEndian

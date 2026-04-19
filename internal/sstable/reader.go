@@ -230,7 +230,7 @@ func (r *Reader) Iterator(start []byte, end []byte) (*Iterator, error) {
 		if start == nil {
 			startIndex = block.firstKeyIndex
 		} else {
-			index, err := r.findFirstGreaterOrEqual(block, start)
+			index, err := r.findFirstGreaterOrEqual(0, start)
 			if err != nil {
 				return nil, fmt.Errorf("sstable iterator: failed to find start index: %w", err)
 			}
@@ -244,7 +244,7 @@ func (r *Reader) Iterator(start []byte, end []byte) (*Iterator, error) {
 			if CompareKeys(block.lastKey, end) < 0 {
 				endIndex = NoIndex
 			} else {
-				index, err := r.findFirstGreaterOrEqual(block, end)
+				index, err := r.findFirstGreaterOrEqual(0, end)
 				if err != nil {
 					return nil, fmt.Errorf("sstable iterator: failed to find end index: %w", err)
 				}
@@ -264,8 +264,8 @@ func (r *Reader) Iterator(start []byte, end []byte) (*Iterator, error) {
 		// Бинарный поиск для поиска блока, в котором содержится первый ключ, больший либо равный start
 
 		// i1 и i2 - 2 кандидата (блока)
-		var blockIndex1 int64 = 0
-		blockIndex2 := int64(len(r.blocksInfo)) - 1
+		var blockIndex1 = 0
+		blockIndex2 := len(r.blocksInfo) - 1
 
 		for blockIndex2-blockIndex1 > 1 {
 			middleIndex := (blockIndex1 + blockIndex2) / 2
@@ -279,22 +279,21 @@ func (r *Reader) Iterator(start []byte, end []byte) (*Iterator, error) {
 		}
 
 		block1 := r.blocksInfo[blockIndex1]
-		block2 := r.blocksInfo[blockIndex2]
 
 		if CompareKeys(block1.lastKey, start) >= 0 {
-			index, err := r.findFirstGreaterOrEqual(block1, start)
+			index, err := r.findFirstGreaterOrEqual(blockIndex1, start)
 			if err != nil {
 				return nil, fmt.Errorf("sstable iterator: end block1: %w", err)
 			}
 			startIndex = index
-			startBlockIndex = blockIndex1
+			startBlockIndex = int64(blockIndex1)
 		} else {
-			index, err := r.findFirstGreaterOrEqual(block2, start)
+			index, err := r.findFirstGreaterOrEqual(blockIndex2, start)
 			if err != nil {
 				return nil, fmt.Errorf("sstable iterator: end block2: %w", err)
 			}
 			startIndex = index
-			startBlockIndex = blockIndex2
+			startBlockIndex = int64(blockIndex2)
 		}
 	}
 
@@ -305,8 +304,8 @@ func (r *Reader) Iterator(start []byte, end []byte) (*Iterator, error) {
 		// Бинарный поиск для поиска блока, в котором содержится первый ключ, меньший end
 
 		// i1 и i2 - 2 кандидата (блока)
-		blockIndex1 := 0
-		blockIndex2 := len(r.blocksInfo) - 1
+		var blockIndex1 = 0
+		var blockIndex2 = len(r.blocksInfo) - 1
 
 		for blockIndex2-blockIndex1 > 1 {
 			middleIndex := (blockIndex1 + blockIndex2) / 2
@@ -319,30 +318,40 @@ func (r *Reader) Iterator(start []byte, end []byte) (*Iterator, error) {
 			}
 		}
 
-		block1 := r.blocksInfo[blockIndex1]
 		block2 := r.blocksInfo[blockIndex2]
 
 		if CompareKeys(block2.lastKey, end) < 0 {
 			endIndex = NoIndex
 		} else if CompareKeys(block2.firstKey, end) < 0 {
-			index, err := r.findFirstGreaterOrEqual(block2, end)
+			index, err := r.findFirstGreaterOrEqual(blockIndex2, end)
 			if err != nil {
 				return nil, fmt.Errorf("sstable iterator: end block2: %w", err)
 			}
-			endIndex = index
+
+			if index == NoIndex && blockIndex2 != len(r.blocksInfo)-1 {
+				endIndex = r.blocksInfo[blockIndex2+1].firstKeyIndex
+			} else {
+				endIndex = index
+			}
 		} else {
-			index, err := r.findFirstGreaterOrEqual(block1, end)
+			index, err := r.findFirstGreaterOrEqual(blockIndex1, end)
 			if err != nil {
 				return nil, fmt.Errorf("sstable iterator: end block1: %w", err)
 			}
-			endIndex = index
+
+			if index == NoIndex {
+				endIndex = r.blocksInfo[blockIndex1+1].firstKeyIndex
+			} else {
+				endIndex = index
+			}
 		}
 	}
 
 	return NewIterator(r, startIndex, endIndex, startBlockIndex), nil
 }
 
-func (r *Reader) findFirstGreaterOrEqual(block *readerBlockInfo, target []byte) (int64, error) {
+func (r *Reader) findFirstGreaterOrEqual(blockIndex int, target []byte) (int64, error) {
+	block := r.blocksInfo[blockIndex]
 	var offset = block.firstKeyIndex
 
 	for {
@@ -363,28 +372,4 @@ func (r *Reader) findFirstGreaterOrEqual(block *readerBlockInfo, target []byte) 
 	}
 
 	return NoIndex, nil
-}
-
-func (r *Reader) findLastLessEqual(block *readerBlockInfo, target []byte) (int64, error) {
-	var offset = block.firstKeyIndex
-	var lastIndex int64 = NoIndex
-
-	for {
-		key, _, nextOffset, err := r.readRecord(offset, true)
-		if err != nil {
-			return 0, fmt.Errorf("sstable findLastLessEqual: failed to scan keys %d: %w", nextOffset, err)
-		}
-
-		if CompareKeys(key, target) >= 0 {
-			lastIndex = offset
-		}
-
-		if offset == block.lastKeyIndex {
-			break
-		}
-
-		offset = nextOffset
-	}
-
-	return lastIndex, nil
 }

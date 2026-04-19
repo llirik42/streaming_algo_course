@@ -35,8 +35,6 @@ func TestIterator(t *testing.T, it iterator.Iterator, start, end, step int) {
 		}
 	}
 
-	t.Errorf("%v\n", it)
-
 	// Потому что 13 - несчастливое число
 	for i := 0; i < 13; i++ {
 		_, _, ok, err := it.Next()
