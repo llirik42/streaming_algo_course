@@ -52,16 +52,16 @@ func (r *Reader) Iterator(start []byte, end []byte) (*Iterator, error) {
 	if !r.hasBlocks() {
 		return emptyIterator, nil
 	}
-	if start == nil && end == nil {
-		return NewIterator(r, r.getFirstBlock().firstKeyIndex, NoIndex, 0), nil
-	}
-	if start != nil && end != nil && CompareKeys(start, end) >= 0 {
-		return emptyIterator, nil
-	}
 
 	firstBlock := r.getFirstBlock()
 	lastBlock := r.getLastBlock()
 
+	if start == nil && end == nil {
+		return NewIterator(r, firstBlock.firstKeyIndex, NoIndex, 0), nil
+	}
+	if start != nil && end != nil && CompareKeys(start, end) >= 0 {
+		return emptyIterator, nil
+	}
 	if start != nil && CompareKeys(lastBlock.lastKey, start) < 0 {
 		return emptyIterator, nil
 	}
@@ -74,7 +74,7 @@ func (r *Reader) Iterator(start []byte, end []byte) (*Iterator, error) {
 	var startBlockIndex int
 
 	if start == nil {
-		startIndex = firstBlock.firstKeyIndex
+		startIndex = 0
 		startBlockIndex = 0
 	} else {
 		if r.getBlocksNumber() == 1 {
@@ -91,14 +91,14 @@ func (r *Reader) Iterator(start []byte, end []byte) (*Iterator, error) {
 			if CompareKeys(block1.lastKey, start) >= 0 {
 				index, err := r.findFirstGreaterOrEqualRecord(block1, start)
 				if err != nil {
-					return nil, fmt.Errorf("sstable iterator: end block1: %w", err)
+					return nil, fmt.Errorf("sstable iterator: start block1: %w", err)
 				}
 				startIndex = index
 				startBlockIndex = blockIndex1
 			} else {
 				index, err := r.findFirstGreaterOrEqualRecord(block2, start)
 				if err != nil {
-					return nil, fmt.Errorf("sstable iterator: end block2: %w", err)
+					return nil, fmt.Errorf("sstable iterator: start block2: %w", err)
 				}
 				startIndex = index
 				startBlockIndex = blockIndex2
@@ -137,7 +137,11 @@ func (r *Reader) Iterator(start []byte, end []byte) (*Iterator, error) {
 				if err != nil {
 					return nil, fmt.Errorf("sstable iterator: end block1: %w", err)
 				}
-				endIndex = index
+				if index == NoIndex {
+					endIndex = r.getBlock(blockIndex1 + 1).firstKeyIndex
+				} else {
+					endIndex = index
+				}
 			}
 		}
 	}
