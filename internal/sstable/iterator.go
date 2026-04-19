@@ -6,7 +6,7 @@ type Iterator struct {
 	reader                   *Reader
 	currentIndex             int64
 	endIndex                 int64
-	currentBlockIndex        int64
+	currentBlockIndex        int
 	currentBlockLastKeyIndex int64
 }
 
@@ -15,12 +15,12 @@ func EmptyIterator() *Iterator {
 		reader:                   nil,
 		currentIndex:             NoIndex,
 		endIndex:                 NoIndex,
-		currentBlockIndex:        NoIndex,
+		currentBlockIndex:        0,
 		currentBlockLastKeyIndex: NoIndex,
 	}
 }
 
-func NewIterator(reader *Reader, startIndex, endIndex, startBlockIndex int64) *Iterator {
+func NewIterator(reader *Reader, startIndex, endIndex int64, startBlockIndex int) *Iterator {
 	return &Iterator{
 		reader:                   reader,
 		currentIndex:             startIndex,
@@ -48,7 +48,7 @@ func (it *Iterator) Next() (key, value []byte, ok bool, err error) {
 		return
 	}
 
-	if it.currentBlockIndex+1 >= int64(len(it.reader.blocksInfo)) {
+	if it.currentBlockIndex+1 >= len(it.reader.blocksInfo) {
 		// Текущий блок последний (дальше блоков нет)
 		it.currentIndex = NoIndex
 		return
