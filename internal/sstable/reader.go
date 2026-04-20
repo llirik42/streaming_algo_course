@@ -50,7 +50,7 @@ func NewReader(ioReader io.ReaderAt, totalSize int64) (*Reader, error) {
 func (r *Reader) Iterator(start []byte, end []byte) (*Iterator, error) {
 	emptyIterator := EmptyIterator()
 
-	if !r.hasBlocks() {
+	if !r.HasRecords() {
 		return emptyIterator, nil
 	}
 
@@ -179,6 +179,18 @@ func (r *Reader) ValidateChecksum() error {
 	}
 
 	return nil
+}
+
+func (r *Reader) HasRecords() bool {
+	return r.getBlocksNumber() > 0
+}
+
+func (r *Reader) GetFirstKey() []byte {
+	return r.getFirstBlock().firstKey
+}
+
+func (r *Reader) GetLastKey() []byte {
+	return r.getLastBlock().lastKey
 }
 
 func (r *Reader) readFooter() error {
@@ -386,10 +398,6 @@ func (r *Reader) findLessBlocks(key []byte) (int, int) {
 	}
 
 	return blockIndex1, blockIndex2
-}
-
-func (r *Reader) hasBlocks() bool {
-	return r.getBlocksNumber() > 0
 }
 
 func (r *Reader) getBlocksNumber() int {
