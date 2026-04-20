@@ -29,7 +29,7 @@ type Reader struct {
 	totalSize  int64
 }
 
-func NewReader(ioReader io.ReaderAt, totalSize int64, validateChecksum bool) (*Reader, error) {
+func NewReader(ioReader io.ReaderAt, totalSize int64) (*Reader, error) {
 	reader := &Reader{
 		blocksInfo: make([]*readerBlockInfo, 0),
 		ioReader:   ioReader,
@@ -42,12 +42,6 @@ func NewReader(ioReader io.ReaderAt, totalSize int64, validateChecksum bool) (*R
 
 	if err := reader.readAllBlocksInfo(); err != nil {
 		return nil, fmt.Errorf("sstable NewReader: reading footer: %w", err)
-	}
-
-	if validateChecksum {
-		if err := reader.validateChecksum(); err != nil {
-			return nil, fmt.Errorf("sstable NewReader: validating checksum: %w", err)
-		}
 	}
 
 	return reader, nil
@@ -154,6 +148,37 @@ func (r *Reader) Iterator(start []byte, end []byte) (*Iterator, error) {
 	}
 
 	return NewIterator(r, startIndex, endIndex, startBlockIndex), nil
+}
+
+func (r *Reader) ValidateChecksum() error {
+	checksumHash := createChecksumHash()
+
+	it, err := r.Iterator(nil, nil)
+	if err != nil {
+		return fmt.Errorf("sstable ValidateChecksum: creating iterator for checksum: %w", err)
+	}
+
+	for {
+		key, value, ok, err := it.Next()
+
+		if err != nil {
+			return fmt.Errorf("sstable ValidateChecksum: scanning records for checksum: %w", err)
+		}
+		if !ok {
+			break
+		}
+
+		if err := updateChecksum(key, value, checksumHash); err != nil {
+			return fmt.Errorf("sstable ValidateChecksum: updating checksum: %w", err)
+		}
+	}
+
+	checksum := calculateChecksum(checksumHash)
+	if !bytes.Equal(checksum, r.footer.checksum) {
+		return fmt.Errorf("sstable ValidateChecksum: checksum mismatch")
+	}
+
+	return nil
 }
 
 func (r *Reader) readFooter() error {
@@ -361,37 +386,6 @@ func (r *Reader) findLessBlocks(key []byte) (int, int) {
 	}
 
 	return blockIndex1, blockIndex2
-}
-
-func (r *Reader) validateChecksum() error {
-	checksumHash := createChecksumHash()
-
-	it, err := r.Iterator(nil, nil)
-	if err != nil {
-		return fmt.Errorf("sstable validateChecksum: creating iterator for checksum: %w", err)
-	}
-
-	for {
-		key, value, ok, err := it.Next()
-
-		if err != nil {
-			return fmt.Errorf("sstable validateChecksum: scanning records for checksum: %w", err)
-		}
-		if !ok {
-			break
-		}
-
-		if err := updateChecksum(key, value, checksumHash); err != nil {
-			return fmt.Errorf("sstable validateChecksum: updating checksum: %w", err)
-		}
-	}
-
-	checksum := calculateChecksum(checksumHash)
-	if !bytes.Equal(checksum, r.footer.checksum) {
-		return fmt.Errorf("sstable validateChecksum: checksum mismatch")
-	}
-
-	return nil
 }
 
 func (r *Reader) hasBlocks() bool {
