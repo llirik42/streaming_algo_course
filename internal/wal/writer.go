@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	NumberOfRecordInChecksum int = 1000
+	NumberOfRecordInChecksum int = 10000
 )
 
 var ByteOrder binary.ByteOrder = binary.LittleEndian
@@ -47,7 +47,7 @@ func (w *Writer) Append(record Record) error {
 func (w *Writer) Close() error {
 	recordsToAlign := NumberOfRecordInChecksum - w.currentChecksumRecordsNumber
 	for i := 0; i < recordsToAlign; i++ {
-		if err := w.Append(Record{}); err != nil {
+		if err := w.Append(createGuardRecord()); err != nil {
 			return fmt.Errorf("wal Close: writing alignment record: %w", err)
 		}
 	}

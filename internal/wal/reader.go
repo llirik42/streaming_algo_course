@@ -3,145 +3,132 @@ package wal
 import (
 	"bytes"
 	"fmt"
-	"hash"
 	"io"
 )
 
 type Reader struct {
-	ioReader                   io.ReaderAt
-	validateChecksum           bool
-	offset                     int64
-	currentChecksum            hash.Hash
-	currentChecksumRecordsRead int
-	currentChecksumRecords     []Record
-	lastChecksum               []byte
-	totalSize                  int64
+	ioReader  io.ReaderAt
+	totalSize int64
 }
 
 func NewReader(ioReader io.ReaderAt, totalSize int64) *Reader {
 	return &Reader{ioReader: ioReader, totalSize: totalSize}
 }
 
-func (r *Reader) Next() (Record, bool, error) {
-	record, err := r.readRecord()
-	if err != nil {
-		return Record{}, false, fmt.Errorf("wal Next: read record: %w", err)
+func (r *Reader) Iterator() *Iterator {
+	return &Iterator{
+		reader:    r,
+		endOffset: r.totalSize,
 	}
-
-	r.currentChecksumRecordsRead++
-	if r.currentChecksumRecordsRead == NumberOfRecordInChecksum {
-		r.currentChecksumRecordsRead = 0
-		if err := r.readChecksum(); err != nil {
-			return Record{}, false, fmt.Errorf("wal Next: read checksum: %w", err)
-		}
-	}
-
-	return record, true, nil
 }
 
 func (r *Reader) ValidateChecksums() error {
-	previousOffset := r.offset
-	r.offset = 0
+	var offset int64 = 0
 
-	for checksumIndex := 0; r.offset < r.totalSize; checksumIndex++ {
+	for offset < r.totalSize {
 		checksumHash := createChecksumHash()
 
 		for recordIndex := 0; recordIndex < NumberOfRecordInChecksum; recordIndex++ {
-			record, ok, err := r.Next()
+			record, readCount1, err := r.readRecord(offset)
 			if err != nil {
-				return fmt.Errorf("wal ValidateChecksums: read record %d: %w", recordIndex, err)
-			}
-			if !ok {
-				return fmt.Errorf("wal ValidateChecksums: read record got not ok, expected ok")
+				return fmt.Errorf("wal ValidateChecksums: read record: %w", err)
 			}
 			if err := updateChecksum(record, checksumHash); err != nil {
 				return fmt.Errorf("wal ValidateChecksums: update checksum: %w", err)
 			}
+			offset += readCount1
 		}
 
-		if !bytes.Equal(calculateChecksum(checksumHash), r.lastChecksum) {
-			return fmt.Errorf("wal ValidateChecksums: mismatch on checksum %d", checksumIndex)
+		realChecksum, readCount2, err := r.readChecksum(offset)
+		if err != nil {
+			return fmt.Errorf("wal ValidateChecksums: read checksum: %w", err)
+		}
+		offset += readCount2
+
+		calculatedChecksum := calculateChecksum(checksumHash)
+
+		if !bytes.Equal(calculatedChecksum, realChecksum) {
+			return fmt.Errorf("wal ValidateChecksums: mismatch on checksum")
 		}
 	}
-
-	r.offset = previousOffset
 
 	return nil
 }
 
-func (r *Reader) readRecord() (Record, error) {
-	recordTypeBytes, err := r.readBytes(1)
+func (r *Reader) readRecord(offset int64) (Record, int64, error) {
+	recordTypeBytes, readCount1, err := r.readBytes(offset, 1)
 	if err != nil {
-		return Record{}, fmt.Errorf("wal readRecord: reading record type: %v", err)
+		return Record{}, 0, fmt.Errorf("wal readRecord: reading record type: %v", err)
 	}
 	recordType := OpType(recordTypeBytes[0])
 
-	key, err := r.readBytesWithLength()
+	key, readCount2, err := r.readBytesWithLength(offset + readCount1)
 	if err != nil {
-		return Record{}, fmt.Errorf("wal readRecord: reading record key: %v", err)
+		return Record{}, 0, fmt.Errorf("wal readRecord: reading record key: %v", err)
 	}
+
+	readCount := readCount1 + readCount2
 
 	var value []byte
 	if recordType == OpPut {
-		value, err = r.readBytesWithLength()
+		var readCount3 int64
+		value, readCount3, err = r.readBytesWithLength(offset + readCount1 + readCount2)
 		if err != nil {
-			return Record{}, fmt.Errorf("wal readRecord: reading record value: %v", err)
+			return Record{}, readCount1 + readCount2 + readCount3, fmt.Errorf("wal readRecord: reading record value: %v", err)
 		}
+		readCount += readCount3
 	}
 
 	return Record{
 		Type:  recordType,
 		Key:   key,
 		Value: value,
-	}, nil
+	}, readCount, nil
 }
 
-func (r *Reader) readChecksum() error {
-	checksum, err := r.readBytesWithLength()
+func (r *Reader) readChecksum(offset int64) ([]byte, int64, error) {
+	checksum, readCount, err := r.readBytesWithLength(offset)
 	if err != nil {
-		return fmt.Errorf("wal readChecksum: %v", err)
+		return nil, 0, fmt.Errorf("wal readChecksum: %v", err)
 	}
 
-	r.lastChecksum = checksum
-
-	return nil
+	return checksum, readCount, nil
 }
 
-func (r *Reader) readBytesWithLength() ([]byte, error) {
-	length, err := r.readUint32()
+func (r *Reader) readBytesWithLength(offset int64) ([]byte, int64, error) {
+	length, readCount1, err := r.readUint32(offset)
 	if err != nil {
-		return nil, fmt.Errorf("wal readBytesWithLength: reading length: %w", err)
+		return nil, 0, fmt.Errorf("wal readBytesWithLength: reading length: %w", err)
 	}
 
-	buffer, err := r.readBytes(int(length))
+	// offset+4 - учесть прочитанные 4 байта (uint32) длины буфера
+	buffer, readCount2, err := r.readBytes(offset+readCount1, int(length))
 	if err != nil {
-		return nil, fmt.Errorf("wal readBytesWithLength: reading buffer: %w", err)
+		return nil, 0, fmt.Errorf("wal readBytesWithLength: reading buffer: %w", err)
 	}
 
-	return buffer, nil
+	return buffer, readCount1 + readCount2, nil
 }
 
-func (r *Reader) readUint32() (uint32, error) {
-	buffer, err := r.readBytes(4)
+func (r *Reader) readUint32(offset int64) (uint32, int64, error) {
+	buffer, readCount, err := r.readBytes(offset, 4)
 	if err != nil {
-		return 0, fmt.Errorf("wal readUint32: reading bytes: %w", err)
+		return 0, 0, fmt.Errorf("wal readUint32: reading bytes: %w", err)
 	}
 
-	return ByteOrder.Uint32(buffer), nil
+	return ByteOrder.Uint32(buffer), readCount, nil
 }
 
-func (r *Reader) readBytes(count int) ([]byte, error) {
+func (r *Reader) readBytes(offset int64, count int) ([]byte, int64, error) {
 	buffer := make([]byte, count)
 
-	n, err := r.ioReader.ReadAt(buffer, r.offset)
+	n, err := r.ioReader.ReadAt(buffer, offset)
 	if err != nil {
-		return nil, fmt.Errorf("wal readBytes: %w", err)
+		return nil, 0, fmt.Errorf("wal readBytes: %w", err)
 	}
 	if n < count {
-		return nil, fmt.Errorf("wal readBytes: %d < %d", n, count)
+		return nil, 0, fmt.Errorf("wal readBytes: %d < %d", n, count)
 	}
 
-	r.offset += int64(n)
-
-	return buffer, nil
+	return buffer, int64(count), nil
 }

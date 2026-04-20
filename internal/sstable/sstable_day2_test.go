@@ -1,3 +1,5 @@
+//go:build day2
+
 package sstable
 
 import (
@@ -10,7 +12,7 @@ import (
 	. "kvschool/internal/testutil"
 )
 
-func TestSSTable_EmptyWriterReader(t *testing.T) {
+func TestSSTable_Empty(t *testing.T) {
 	buffer := bytes.NewBuffer(nil)
 
 	writer := NewWriter(buffer)
@@ -43,7 +45,7 @@ func TestSSTable_EmptyWriterReader(t *testing.T) {
 	}
 }
 
-func TestSSTable_SimpleWriterReader(t *testing.T) {
+func TestSSTable_Simple(t *testing.T) {
 	buffer := bytes.NewBuffer(nil)
 
 	writer := NewWriter(buffer)
