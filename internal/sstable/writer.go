@@ -1,7 +1,6 @@
 package sstable
 
 import (
-	"crypto/md5"
 	"encoding/binary"
 	"fmt"
 	"hash"
@@ -33,7 +32,7 @@ func NewWriter(ioWriter io.Writer) *Writer {
 	return &Writer{
 		ioWriter:     ioWriter,
 		blocksInfo:   make([]*writerBlockInfo, 0),
-		checksumHash: md5.New(),
+		checksumHash: createChecksumHash(),
 	}
 }
 
@@ -110,7 +109,7 @@ func (w *Writer) writeRecord(key, value []byte) error {
 	if err := w.writeBytes(value); err != nil {
 		return fmt.Errorf("sstable add: write value: %w", err)
 	}
-	if err := w.updateChecksum(key, value); err != nil {
+	if err := updateChecksum(key, value, w.checksumHash); err != nil {
 		return fmt.Errorf("sstable add: updating checksum: %w", err)
 	}
 
@@ -153,7 +152,7 @@ func (w *Writer) writeBlocksInfo() error {
 }
 
 func (w *Writer) writeChecksum() error {
-	checksum := w.checksumHash.Sum(nil)
+	checksum := calculateChecksum(w.checksumHash)
 	checksumLength := len(checksum)
 
 	if err := w.writeBytes(checksum); err != nil {
@@ -211,29 +210,6 @@ func (w *Writer) align(alignment uint64) error {
 	if uint64(n) < alignment {
 		return fmt.Errorf("sstable align: %d < %d", n, alignment)
 	}
-	return nil
-}
-
-func (w *Writer) updateChecksum(key []byte, value []byte) error {
-	var n int
-	var err error
-
-	n, err = w.checksumHash.Write(key)
-	if err != nil {
-		return fmt.Errorf("sstable writeRecord: write key for hash: %w", err)
-	}
-	if n < len(key) {
-		return fmt.Errorf("sstable writeRecord: write key for hash: %d < %d", n, len(key))
-	}
-
-	n, err = w.checksumHash.Write(value)
-	if err != nil {
-		return fmt.Errorf("sstable writeRecord: write value for hash: %w", err)
-	}
-	if n < len(value) {
-		return fmt.Errorf("sstable writeRecord: write value for hash: %d < %d", n, len(value))
-	}
-
 	return nil
 }
 

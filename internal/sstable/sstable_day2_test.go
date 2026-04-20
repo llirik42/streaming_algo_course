@@ -18,7 +18,7 @@ func TestSSTable_EmptyWriterReader(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reader, err := NewReader(bytes.NewReader(buffer.Bytes()), int64(buffer.Len()))
+	reader, err := NewReader(bytes.NewReader(buffer.Bytes()), int64(buffer.Len()), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestSSTable_SimpleWriterReader(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reader, err := NewReader(bytes.NewReader(buffer.Bytes()), int64(buffer.Len()))
+	reader, err := NewReader(bytes.NewReader(buffer.Bytes()), int64(buffer.Len()), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestSSTable_IteratorClose(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reader, err := NewReader(bytes.NewReader(buffer.Bytes()), int64(buffer.Len()))
+	reader, err := NewReader(bytes.NewReader(buffer.Bytes()), int64(buffer.Len()), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +179,7 @@ func TestSSTable_IteratorRangeSmall(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reader, err := NewReader(bytes.NewReader(buffer.Bytes()), int64(buffer.Len()))
+	reader, err := NewReader(bytes.NewReader(buffer.Bytes()), int64(buffer.Len()), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +227,7 @@ func TestSSTable_IteratorRangeLarge(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reader, err := NewReader(bytes.NewReader(buffer.Bytes()), int64(buffer.Len()))
+	reader, err := NewReader(bytes.NewReader(buffer.Bytes()), int64(buffer.Len()), true)
 	if err != nil {
 		t.Fatal(err)
 	}
