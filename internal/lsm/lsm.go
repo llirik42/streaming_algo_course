@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"kvschool/internal/iterator"
 	"kvschool/internal/skiplist"
 	"kvschool/internal/sstable"
 	"kvschool/internal/wal"
@@ -24,24 +25,66 @@ const (
 )
 
 type pair struct {
-	key   []byte
-	value []byte
+	key    []byte
+	value  []byte
+	source iterator.Iterator
 }
 
 type Iterator struct {
-	memTableIterator     *skiplist.Iterator
-	previousMemTablePair *pair
-
-	sstablesIterators    [][]*skiplist.Iterator
-	previousSSTablePairs [][]*pair
+	memTableIterator  iterator.Iterator
+	sstablesIterators [][]iterator.Iterator
+	pairs             []pair
+	toMove            iterator.Iterator
+	empty             bool
 }
 
-func (it *Iterator) Next() (key []byte, value []byte, err error) {
-	return nil, nil, nil
+func (it *Iterator) Next() (key []byte, value []byte, ok bool, err error) {
+	// TODO: нужно делать всё умнее: не просто добавлять в список пар, а проверять: если уже есть с таким ключом и от кого?
+
+	if it.empty {
+		return nil, nil, false, nil
+	}
+
+	if it.toMove == nil {
+		sortPairs(it.pairs)
+
+		if len(it.pairs) == 0 {
+			it.empty = true
+			return nil, nil, false, nil
+		}
+
+		for {
+			firstPair := it.pairs[0]
+			it.pairs = it.pairs[1:]
+
+			firstPairRealValue, deleted := extractKeyValue(firstPair.value)
+			if !deleted {
+				it.toMove = firstPair.source
+				return firstPair.key, firstPairRealValue, true, nil
+			}
+
+			if len(it.pairs) == 0 {
+				break
+			}
+		}
+	}
+
+	it.empty = true
+	return nil, nil, false, nil
 }
 
 func (it *Iterator) Close() error {
-	return nil
+	err1 := it.memTableIterator.Close()
+	errorsList := []error{err1}
+
+	for i := 0; i < len(it.sstablesIterators); i++ {
+		for j := 0; j < len(it.sstablesIterators[i]); j++ {
+			err := it.sstablesIterators[i][j].Close()
+			errorsList = append(errorsList, err)
+		}
+	}
+
+	return errors.Join(errorsList...)
 }
 
 // Options задаёт параметры LSM движка.
@@ -331,9 +374,57 @@ func (e *Engine) Delete(key []byte) error {
 	return nil
 }
 
-func (e *Engine) Scan(start []byte, end []byte) error {
+func (e *Engine) Scan(start []byte, end []byte) (iterator.Iterator, error) {
+	sortedPairs := make([]pair, 0)
 
-	return nil
+	memTableIterator, err := e.memTable.Scan(start, end)
+	if err != nil {
+		return nil, fmt.Errorf("lsm Scan: get memtable iterator: %w", err)
+	}
+	key, value, ok, err := memTableIterator.Next()
+	if err != nil {
+		return nil, fmt.Errorf("lsm Scan: get memtable iterator: %w", err)
+	}
+	if !ok {
+		memTableIterator = nil
+	} else {
+		sortedPairs = append(sortedPairs, pair{
+			key:    key,
+			value:  value,
+			source: memTableIterator,
+		})
+	}
+
+	sstablesIterators := make([][]iterator.Iterator, len(e.sstables))
+	for i := 0; i < len(sstablesIterators); i++ {
+		sstablesIterators[i] = make([]iterator.Iterator, len(e.sstables[i]))
+		for j := 0; j < len(sstablesIterators[i]); j++ {
+			sstablesIterators[i][j], err = e.sstables[i][j].reader.Iterator(start, end)
+			if err != nil {
+				return nil, fmt.Errorf("lsm Scan: get sstable iterator: %w", err)
+			}
+
+			key, value, ok, err := sstablesIterators[i][j].Next()
+			if err != nil {
+				return nil, fmt.Errorf("lsm Scan: get sstable iterator: %w", err)
+			}
+			if !ok {
+				sstablesIterators[i][j] = nil
+			} else {
+				sortedPairs = append(sortedPairs, pair{
+					key:    key,
+					value:  value,
+					source: sstablesIterators[i][j],
+				})
+			}
+		}
+	}
+
+	return &Iterator{
+		memTableIterator:  memTableIterator,
+		sstablesIterators: sstablesIterators,
+		pairs:             sortedPairs,
+	}, nil
 }
 
 func (e *Engine) Close() error {

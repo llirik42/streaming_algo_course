@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	. "kvschool/internal/helpers"
+	"kvschool/internal/iterator"
 )
 
 const (
@@ -47,7 +48,7 @@ func NewReader(ioReader io.ReaderAt, totalSize int64) (*Reader, error) {
 	return reader, nil
 }
 
-func (r *Reader) Iterator(start []byte, end []byte) (*Iterator, error) {
+func (r *Reader) Iterator(start []byte, end []byte) (iterator.Iterator, error) {
 	emptyIterator := EmptyIterator()
 
 	if !r.HasRecords() {
