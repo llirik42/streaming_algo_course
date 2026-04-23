@@ -3,6 +3,7 @@ package lsmstore
 import (
 	"context"
 	"errors"
+	"kvschool/internal/skiplist"
 
 	"kvschool/internal/kv"
 )
@@ -12,13 +13,19 @@ var ErrNotImplemented = errors.New("lsmstore: функция не реализо
 
 // Store — KV поверх LSM.
 // В практической реализации вам нужно использовать пакеты internal/lsm, internal/sstable, internal/wal.
-type Store struct{}
+type Store struct {
+	l0 skiplist.SkipList
+}
 
 type Options struct {
 	Dir string
 }
 
-func Open(_ Options) (*Store, error) { return nil, ErrNotImplemented }
+func Open(_ Options) (*Store, error) {
+	// TODO: здесь нужно читать WAL (если есть)
+
+	return nil, ErrNotImplemented
+}
 
 func (s *Store) Put(_ context.Context, _ []byte, _ []byte) error { return ErrNotImplemented }
 

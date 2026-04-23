@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	NumberOfRecordInChecksum int = 10000
+	NumberOfRecordInChecksum int = 100
 )
 
 var ByteOrder binary.ByteOrder = binary.LittleEndian

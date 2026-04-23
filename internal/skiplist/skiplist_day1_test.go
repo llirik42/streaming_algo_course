@@ -124,9 +124,6 @@ func TestSkipList_BasicOperations(t *testing.T) {
 	if !sl.IsEmpty() {
 		t.Fatalf("Not empty")
 	}
-	if levelsNumber := sl.GetLevelsNumber(); levelsNumber != 1 {
-		t.Fatalf("exptected 1 level, got %d", levelsNumber)
-	}
 }
 
 func TestSkipList_UnknownKey(t *testing.T) {

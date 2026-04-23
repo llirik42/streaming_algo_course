@@ -26,12 +26,17 @@ type SkipList struct {
 // New создаёт SkipList. seed требуется для детерминируемых тестов (воспроизводимость поведения при ошибках).
 func New(seed int64) *SkipList {
 	defaultProbability := 0.5
-	head := Node{key: []byte{}, next: []*Node{nil}}
 
-	return &SkipList{
-		head:        &head,
+	s := &SkipList{
 		coinFlipper: coinflipper.New(seed, defaultProbability),
 	}
+	s.resetHead()
+
+	return s
+}
+
+func (s *SkipList) Clear() {
+	s.resetHead()
 }
 
 func (s *SkipList) SetProbability(probability float64) error {
@@ -46,10 +51,6 @@ func (s *SkipList) SetProbability(probability float64) error {
 
 func (s *SkipList) IsEmpty() bool {
 	return s.head.next[0] == nil
-}
-
-func (s *SkipList) GetLevelsNumber() int {
-	return len(s.head.next)
 }
 
 func (s *SkipList) Put(key, value []byte) error {
@@ -69,7 +70,7 @@ func (s *SkipList) Put(key, value []byte) error {
 		next:  make([]*Node, 0, 1), // Allocate for the 0th level
 	}
 	insertAfter(zeroLevelPredecessor, newNode, zeroLevel)
-	levelsNumber := s.GetLevelsNumber()
+	levelsNumber := s.getLevelsNumber()
 
 	for level := 1; ; level++ {
 		if !s.coinFlipper.Flip() {
@@ -110,7 +111,7 @@ func (s *SkipList) Delete(key []byte) error {
 	}
 
 	node := zeroLevelPredecessorSuccessor
-	for level := s.GetLevelsNumber() - 1; level >= 0; level-- {
+	for level := s.getLevelsNumber() - 1; level >= 0; level-- {
 		levelPredecessor := predecessors[level]
 		levelPredecessorSuccessor := levelPredecessor.next[level]
 
@@ -169,7 +170,7 @@ func (s *SkipList) GetRepresentation() string {
 		return "Empty SkipList"
 	}
 
-	levelsNumber := s.GetLevelsNumber()
+	levelsNumber := s.getLevelsNumber()
 	representation := fmt.Sprintf("%d levels\n", levelsNumber)
 
 	for level := 0; level < levelsNumber; level++ {
@@ -188,6 +189,10 @@ func (s *SkipList) GetRepresentation() string {
 	return representation
 }
 
+func (s *SkipList) getLevelsNumber() int {
+	return len(s.head.next)
+}
+
 func (s *SkipList) removeHighestLevel() {
 	head := s.head
 	head.next = head.next[:len(head.next)-1]
@@ -200,7 +205,7 @@ func (s *SkipList) createLevel(firstNode *Node) {
 }
 
 func (s *SkipList) findPredecessors(key []byte) []*Node {
-	levelsNumber := s.GetLevelsNumber()
+	levelsNumber := s.getLevelsNumber()
 	result := make([]*Node, levelsNumber)
 
 	currentNode := s.head
@@ -223,4 +228,8 @@ func (s *SkipList) findPredecessors(key []byte) []*Node {
 	}
 
 	return result
+}
+
+func (s *SkipList) resetHead() {
+	s.head = &Node{next: []*Node{nil}}
 }

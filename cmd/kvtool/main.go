@@ -2,10 +2,8 @@ package main
 
 import (
 	"fmt"
-	"kvschool/internal/sstable"
-	"log"
+	"kvschool/internal/lsm"
 	"math/rand"
-	"os"
 )
 
 func stringToBytes(s string) []byte {
@@ -29,66 +27,39 @@ func generateRandomString() string {
 	return generateRandomStringByLength(32)
 }
 
-func write() {
-	file, err := os.Create("test.bin")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer file.Close()
-
-	writer := sstable.NewWriter(file)
-	defer writer.Close()
-
-	for i := 0; i < 10; i++ {
-		//value := generateRandomString()
-
-		value := fmt.Sprintf("value-%d", i+1)
-
-		if err := writer.Add(stringToBytes(fmt.Sprintf("key-%d", i+1)), stringToBytes(value)); err != nil {
-			log.Fatal(err)
-		}
-	}
-}
-
-func read() {
-	file, err := os.Open("test.bin")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer file.Close()
-
-	info, err := file.Stat()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	r, err := sstable.NewReader(file, info.Size())
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	it, err := r.Iterator(nil, nil)
-	defer it.Close()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	for {
-		key, value, ok, err := it.Next()
-		if err != nil {
-			log.Fatal(err)
-			break
-		}
-		if !ok {
-			break
-		}
-
-		fmt.Printf("%s:%s\n", key, value)
-	}
-}
-
 func main() {
-	write()
-	read()
+	options := lsm.Options{
+		Dir:                    "/home/llirik42/db",
+		MemtableFlushThreshold: 1048576,
+	}
 
+	engine, err := lsm.Open(options)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Printf("%+v\n", engine)
+
+	if err := engine.Put(stringToBytes("key"), stringToBytes("value-3")); err != nil {
+		panic(err)
+	}
+	value, err := engine.Get(stringToBytes("key"))
+	if err != nil {
+		fmt.Printf("%v", err)
+	} else {
+		fmt.Printf("%+s\n", value)
+	}
+
+	engine.Close()
+
+	//defer func(engine *lsm.Engine) {
+	//	err := engine.Close()
+	//	if err != nil {
+	//		panic(err)
+	//	}
+	//}(engine)
+	//
+	//if err := engine.Put(stringToBytes("key"), stringToBytes("value")); err != nil {
+	//	panic(err)
+	//}
 }
