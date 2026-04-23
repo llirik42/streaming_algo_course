@@ -8,9 +8,11 @@ import (
 	"kvschool/internal/skiplist"
 	"kvschool/internal/sstable"
 	"kvschool/internal/wal"
+	"log"
 	"math"
 	"os"
 	"path"
+	"slices"
 	"strconv"
 	"time"
 )
@@ -24,56 +26,186 @@ const (
 	T = 2
 )
 
+type pairSource struct {
+	isMemTable bool
+	levelIndex int
+	index      int
+	iterator   iterator.Iterator
+}
+
+func compareSources(ps1 *pairSource, ps2 *pairSource) int {
+	if ps1.iterator == ps2.iterator {
+		log.Fatalln("Unexpected")
+		return 0
+	}
+
+	if ps1.isMemTable {
+		return 1
+	}
+
+	if ps2.isMemTable {
+		return -1
+	}
+
+	if ps1.levelIndex == ps2.levelIndex {
+		log.Fatalln("Comparing sstables on the same level")
+		return 0
+	}
+
+	if ps1.levelIndex < ps2.levelIndex {
+		return 1
+	}
+
+	return -1
+}
+
 type pair struct {
 	key    []byte
 	value  []byte
-	source iterator.Iterator
+	source pairSource
 }
 
 type Iterator struct {
 	memTableIterator  iterator.Iterator
 	sstablesIterators [][]iterator.Iterator
 	pairs             []pair
-	toMove            iterator.Iterator
-	empty             bool
+	toMove            pairSource
+	isEmpty           bool
 }
 
 func (it *Iterator) Next() (key []byte, value []byte, ok bool, err error) {
 	// TODO: нужно делать всё умнее: не просто добавлять в список пар, а проверять: если уже есть с таким ключом и от кого?
 
-	if it.empty {
+	if it.isEmpty {
 		return nil, nil, false, nil
 	}
 
-	if it.toMove == nil {
+	for {
+		memTableKey, memTableValue, memTableOk, memTableErr := it.memTableIterator.Next()
+		memTableSource := pairSource{
+			isMemTable: true,
+			levelIndex: 0,
+			index:      0,
+			iterator:   it.memTableIterator,
+		}
+
+		if memTableErr != nil {
+			return nil, nil, false, fmt.Errorf("%w", err)
+		}
+
+		if memTableOk {
+			found := false
+
+			for i := 0; i < len(it.pairs); i++ {
+				previousPair := it.pairs[i]
+				previousSource := it.pairs[i].source
+				if bytes.Equal(previousPair.key, memTableKey) {
+					found = true
+
+					// Мы более новые, поэтому меняем value по ключу
+					if compareSources(&memTableSource, &previousSource) > 0 {
+						it.pairs[i].value = memTableValue
+					}
+				}
+			}
+
+			if !found {
+				it.pairs = append(it.pairs, pair{
+					key:   memTableKey,
+					value: memTableValue,
+					source: pairSource{
+						isMemTable: true,
+						levelIndex: 0,
+						index:      0,
+						iterator:   it.memTableIterator,
+					},
+				})
+			}
+		} else {
+			// TODO: оптимизировать! (если не ok, то дальше нет смысла вызывать Next для memTableIterator
+		}
+
+		hasSSTablesToMove := false // true - есть ещё sstables, у которых можно продвинуться
+		for levelIndex := 0; levelIndex < len(it.sstablesIterators); levelIndex++ {
+			for index := 0; index < len(it.sstablesIterators[levelIndex]); index++ {
+				currentIterator := it.sstablesIterators[levelIndex][index]
+				currentSource := pairSource{
+					isMemTable: false,
+					levelIndex: levelIndex,
+					index:      index,
+					iterator:   currentIterator,
+				}
+
+				currentKey, currentValue, currentOk, currentErr := currentIterator.Next()
+				hasSSTablesToMove = hasSSTablesToMove || currentOk
+
+				if currentErr != nil {
+					return nil, nil, false, fmt.Errorf("%w", err)
+				}
+				if currentOk {
+					found := false
+
+					for i := 0; i < len(it.pairs); i++ {
+						previousPair := it.pairs[i]
+						previousSource := it.pairs[i].source
+						if bytes.Equal(previousPair.key, currentKey) {
+							found = true
+
+							// Мы более новые, поэтому меняем value по ключу
+							if compareSources(&currentSource, &previousSource) > 0 {
+								it.pairs[i].value = currentValue
+							}
+						}
+					}
+
+					if !found {
+						it.pairs = append(it.pairs, pair{
+							key:   currentKey,
+							value: currentValue,
+							source: pairSource{
+								isMemTable: false,
+								levelIndex: levelIndex,
+								index:      index,
+								iterator:   currentIterator,
+							},
+						})
+					}
+				} else {
+					// TODO: оптимизировать! (если не ok, то дальше нет смысла вызывать Next для (levelIndex, index)
+				}
+			}
+		}
+
 		sortPairs(it.pairs)
 
+		it.pairs = slices.DeleteFunc(it.pairs, func(p pair) bool {
+			_, deleted := extractKeyValue(p.value)
+			return deleted
+		})
+
 		if len(it.pairs) == 0 {
-			it.empty = true
-			return nil, nil, false, nil
-		}
-
-		for {
-			firstPair := it.pairs[0]
-			it.pairs = it.pairs[1:]
-
-			firstPairRealValue, deleted := extractKeyValue(firstPair.value)
-			if !deleted {
-				it.toMove = firstPair.source
-				return firstPair.key, firstPairRealValue, true, nil
-			}
-
-			if len(it.pairs) == 0 {
+			if !memTableOk && !hasSSTablesToMove {
+				it.isEmpty = true
 				break
+			} else {
+				continue
 			}
 		}
+
+		firstPair := it.pairs[0]
+		it.pairs = it.pairs[1:]
+
+		realValue, _ := extractKeyValue(firstPair.value)
+
+		return firstPair.key, realValue, true, nil
 	}
 
-	it.empty = true
 	return nil, nil, false, nil
 }
 
 func (it *Iterator) Close() error {
+	it.isEmpty = true
+
 	err1 := it.memTableIterator.Close()
 	errorsList := []error{err1}
 
@@ -342,11 +474,9 @@ func (e *Engine) Get(key []byte) ([]byte, error) {
 				return realValue, nil
 			}
 		}
-
 	}
 
-	// TODO: страшная логика
-	return nil, ErrNotImplemented
+	return nil, fmt.Errorf("unexpected")
 }
 
 func (e *Engine) Delete(key []byte) error {
@@ -375,24 +505,9 @@ func (e *Engine) Delete(key []byte) error {
 }
 
 func (e *Engine) Scan(start []byte, end []byte) (iterator.Iterator, error) {
-	sortedPairs := make([]pair, 0)
-
 	memTableIterator, err := e.memTable.Scan(start, end)
 	if err != nil {
 		return nil, fmt.Errorf("lsm Scan: get memtable iterator: %w", err)
-	}
-	key, value, ok, err := memTableIterator.Next()
-	if err != nil {
-		return nil, fmt.Errorf("lsm Scan: get memtable iterator: %w", err)
-	}
-	if !ok {
-		memTableIterator = nil
-	} else {
-		sortedPairs = append(sortedPairs, pair{
-			key:    key,
-			value:  value,
-			source: memTableIterator,
-		})
 	}
 
 	sstablesIterators := make([][]iterator.Iterator, len(e.sstables))
@@ -403,27 +518,12 @@ func (e *Engine) Scan(start []byte, end []byte) (iterator.Iterator, error) {
 			if err != nil {
 				return nil, fmt.Errorf("lsm Scan: get sstable iterator: %w", err)
 			}
-
-			key, value, ok, err := sstablesIterators[i][j].Next()
-			if err != nil {
-				return nil, fmt.Errorf("lsm Scan: get sstable iterator: %w", err)
-			}
-			if !ok {
-				sstablesIterators[i][j] = nil
-			} else {
-				sortedPairs = append(sortedPairs, pair{
-					key:    key,
-					value:  value,
-					source: sstablesIterators[i][j],
-				})
-			}
 		}
 	}
 
 	return &Iterator{
 		memTableIterator:  memTableIterator,
 		sstablesIterators: sstablesIterators,
-		pairs:             sortedPairs,
 	}, nil
 }
 

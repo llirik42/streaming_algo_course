@@ -2,9 +2,11 @@ package main
 
 import (
 	"fmt"
-	"kvschool/internal/lsm"
+	"kvschool/internal/sstable"
+	"kvschool/internal/wal"
 	"log"
 	"math/rand"
+	"os"
 )
 
 func stringToBytes(s string) []byte {
@@ -28,42 +30,76 @@ func generateRandomString() string {
 	return generateRandomStringByLength(32)
 }
 
-func main() {
-	options := lsm.Options{
-		Dir:                    "/home/llirik42/db",
-		MemtableFlushThreshold: 1048576,
-	}
-
-	engine, err := lsm.Open(options)
-	if err != nil {
-		panic(err)
-	}
-
-	fmt.Printf("%+v\n", engine)
-
-	if err := engine.Put(stringToBytes("key"), stringToBytes("value-13")); err != nil {
-		panic(err)
-	}
-	value, err := engine.Get(stringToBytes("key"))
-	if err != nil {
-		fmt.Printf("%v", err)
-	} else {
-		fmt.Printf("%+s\n", value)
-	}
-
-	err = engine.Close()
+func walDemo() {
+	file, err := os.Create("/home/llirik42/wal")
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	//defer func(engine *lsm.Engine) {
-	//	err := engine.Close()
-	//	if err != nil {
-	//		panic(err)
-	//	}
-	//}(engine)
-	//
-	//if err := engine.Put(stringToBytes("key"), stringToBytes("value")); err != nil {
-	//	panic(err)
-	//}
+	writer := wal.NewWriter(file)
+	rec1 := wal.Record{
+		Type:  wal.OpPut,
+		Key:   stringToBytes("key1"),
+		Value: stringToBytes("value1"),
+	}
+	rec2 := wal.Record{
+		Type: wal.OpDelete,
+		Key:  stringToBytes("key2"),
+	}
+	if err := writer.Append(rec1); err != nil {
+		log.Fatal(err)
+	}
+	if err := writer.Append(rec2); err != nil {
+		log.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		log.Fatal(err)
+	}
+
+	fileStat, err := file.Stat()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	reader := wal.NewReader(file, fileStat.Size())
+	if err := reader.ValidateChecksums(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func sstableDemo() {
+	file, err := os.Create("/home/llirik42/sstable")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	writer := sstable.NewWriter(file)
+	if err := writer.Add(stringToBytes("key1"), stringToBytes("value1")); err != nil {
+		log.Fatal(err)
+	}
+	if err := writer.Add(stringToBytes("key2"), stringToBytes("value2")); err != nil {
+		log.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		log.Fatal(err)
+	}
+
+	fileStat, err := file.Stat()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	reader, err := sstable.NewReader(file, fileStat.Size())
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := reader.ValidateChecksum(); err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Printf("%s-%s\n", reader.GetFirstKey(), reader.GetLastKey())
+}
+
+func main() {
+	walDemo()
 }
