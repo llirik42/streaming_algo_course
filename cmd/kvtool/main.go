@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"kvschool/internal/lsm"
+	"log"
 	"math/rand"
 )
 
@@ -40,7 +41,7 @@ func main() {
 
 	fmt.Printf("%+v\n", engine)
 
-	if err := engine.Put(stringToBytes("key"), stringToBytes("value-3")); err != nil {
+	if err := engine.Put(stringToBytes("key"), stringToBytes("value-13")); err != nil {
 		panic(err)
 	}
 	value, err := engine.Get(stringToBytes("key"))
@@ -50,7 +51,10 @@ func main() {
 		fmt.Printf("%+s\n", value)
 	}
 
-	engine.Close()
+	err = engine.Close()
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	//defer func(engine *lsm.Engine) {
 	//	err := engine.Close()

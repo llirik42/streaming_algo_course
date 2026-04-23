@@ -31,7 +31,7 @@ func NewIterator(reader *Reader, startIndex, endIndex int64, startBlockIndex int
 }
 
 func (it *Iterator) Next() (key, value []byte, ok bool, err error) {
-	if it.currentIndex == it.endIndex {
+	if !it.Has() {
 		return nil, nil, false, nil
 	}
 
@@ -60,6 +60,10 @@ func (it *Iterator) Next() (key, value []byte, ok bool, err error) {
 	it.currentIndex = currentBlock.firstKeyIndex
 	it.currentBlockLastKeyIndex = currentBlock.lastKeyIndex
 	return
+}
+
+func (it *Iterator) Has() bool {
+	return it.currentIndex != it.endIndex
 }
 
 func (it *Iterator) Close() error {

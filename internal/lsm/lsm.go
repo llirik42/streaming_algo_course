@@ -1,11 +1,13 @@
 package lsm
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"kvschool/internal/skiplist"
 	"kvschool/internal/sstable"
 	"kvschool/internal/wal"
+	"math"
 	"os"
 	"path"
 	"strconv"
@@ -15,9 +17,32 @@ import (
 // ErrNotImplemented используется в заготовке практики второго дня.
 var ErrNotImplemented = errors.New("lsm: функция не реализована")
 
+var ErrNotFound = errors.New("lsm: ключ не найден")
+
 const (
 	T = 2
 )
+
+type pair struct {
+	key   []byte
+	value []byte
+}
+
+type Iterator struct {
+	memTableIterator     *skiplist.Iterator
+	previousMemTablePair *pair
+
+	sstablesIterators    [][]*skiplist.Iterator
+	previousSSTablePairs [][]*pair
+}
+
+func (it *Iterator) Next() (key []byte, value []byte, err error) {
+	return nil, nil, nil
+}
+
+func (it *Iterator) Close() error {
+	return nil
+}
 
 // Options задаёт параметры LSM движка.
 type Options struct {
@@ -62,9 +87,58 @@ func fileExists(path string) bool {
 }
 
 func Open(options Options) (*Engine, error) {
+	// TODO: многие return nil, fmt.errorf() заменить на предупреждение
+
+	engine := &Engine{
+		memTable: skiplist.New(42),
+		sstables: make([][]*lsmSSTable, 1),
+	}
+
 	if !directoryExists(options.Dir) {
 		if err := os.MkdirAll(options.Dir, 0755); err != nil {
 			return nil, fmt.Errorf("lsm Open: making directory %s: %w", options.Dir, err)
+		}
+	} else {
+		entires, err := os.ReadDir(options.Dir)
+		if err != nil {
+			return nil, fmt.Errorf("lsm Open: reading directory %s: %w", options.Dir, err)
+		}
+
+		for _, entry := range entires {
+			if entry.Name() == "wal" {
+				continue
+				// TODO: перенести чтение WAL сюда
+			}
+
+			sstableFilePath := path.Join(options.Dir, entry.Name())
+			sstableFile, err := os.Open(sstableFilePath)
+			if err != nil {
+				return nil, fmt.Errorf("lsm Open: opening sstable file %s: %w", sstableFilePath, err)
+			}
+
+			stat, err := sstableFile.Stat()
+			if err != nil {
+				return nil, fmt.Errorf("lsm Open: stat sstable file %s: %w", sstableFilePath, err)
+			}
+
+			sstableReader, err := sstable.NewReader(sstableFile, stat.Size())
+			if err != nil {
+				return nil, fmt.Errorf("lsm Open: reading sstable file %s: %w", sstableFilePath, err)
+			}
+			if err := sstableReader.ValidateChecksum(); err != nil {
+				return nil, fmt.Errorf("lsm Open: validating sstable file %s: %w", sstableFilePath, err)
+			}
+
+			creationTimeUnix, err := strconv.ParseInt(entry.Name(), 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("lsm Open: parsing creation time %s: %w", sstableFilePath, err)
+			}
+
+			engine.sstables[0] = append(engine.sstables[0], &lsmSSTable{
+				reader:       sstableReader,
+				file:         sstableFile,
+				creationTime: time.Unix(creationTimeUnix, 0),
+			})
 		}
 	}
 
@@ -74,10 +148,6 @@ func Open(options Options) (*Engine, error) {
 
 	var tmpWalFile *os.File
 	var walWriter *wal.Writer
-
-	engine := &Engine{
-		memTable: skiplist.New(42),
-	}
 
 	if os.IsNotExist(err) {
 		tmpWalFile, err = os.Create(walFilePath)
@@ -142,6 +212,9 @@ func Open(options Options) (*Engine, error) {
 		if err := tmpWalFile.Close(); err != nil {
 			return nil, fmt.Errorf("lsm Open: closing wal file %s: %w", walFilePath, err)
 		}
+		if err := os.Remove(tmpWALFilePath); err != nil {
+			return nil, fmt.Errorf("lsm Open: removing temporary WAL file %s: %w", walFilePath, err)
+		}
 	}
 
 	return engine, nil
@@ -158,14 +231,16 @@ func (e *Engine) Put(key []byte, value []byte) error {
 		return fmt.Errorf("lsm Put: add record to WAL: %w", err)
 	}
 
-	if err := e.memTable.Put(key, value); err != nil {
+	valueToSave := writeKeyValue(value, false)
+	if err := e.memTable.Put(key, valueToSave); err != nil {
 		return fmt.Errorf("lsm Put: add record to l0: %w", err)
 	}
 
-	e.memTableSize += len(key) + len(value)
+	e.memTableSize += len(key) + len(valueToSave)
 	if e.memTableSize > e.flushThreshold {
-		// TODO: создаём sstable (дампаем на диск)
-		// TODO: где-то здесь должна быть проверка compaction
+		if err := e.flush(); err != nil {
+			return fmt.Errorf("lsm Put: flush memtable: %w", err)
+		}
 	}
 
 	return nil
@@ -177,6 +252,54 @@ func (e *Engine) Get(key []byte) ([]byte, error) {
 	if err == nil {
 		// Нашли ключ в skiplist
 		return value, nil
+	}
+
+	for l := 1; l <= len(e.sstables); l++ {
+		candidates := e.findCandidates(key, l)
+
+		// На текущем уровне нет кандидатов
+		if len(candidates) == 0 {
+			if l == len(e.sstables) {
+				// Текущий уровень последний (значит в хранилище вообще ключа нет)
+				return nil, ErrNotFound
+			} else {
+				// Опускаемся на уровень ниже
+				continue
+			}
+		}
+
+		// Проходимся по кандидатам и проверяем, действительно ли в них есть искомый ключ
+		for _, c := range candidates {
+			it, err := c.reader.Iterator(nil, nil)
+			if err != nil {
+				return nil, fmt.Errorf("lsm Get: get iterator: %w", err)
+			}
+
+			for {
+				foundKey, foundValue, ok, err := it.Next()
+				if err != nil {
+					return nil, fmt.Errorf("lsm Get: get iterator Next: %w", err)
+				}
+				if !ok {
+					break
+				}
+
+				if !bytes.Equal(key, foundKey) {
+					// Не нашли текущий ключ
+					continue
+				}
+
+				realValue, deleted := extractKeyValue(foundValue)
+				if deleted {
+					// Нашли информацию об удалении ключа
+					return nil, ErrNotFound
+				}
+
+				// Нашли ключ без информации о его удалении
+				return realValue, nil
+			}
+		}
+
 	}
 
 	// TODO: страшная логика
@@ -193,23 +316,39 @@ func (e *Engine) Delete(key []byte) error {
 		return fmt.Errorf("lsm Delete: add record to WAL: %w", err)
 	}
 
-	if err := e.memTable.Delete(key); err == nil {
-		// Удалили ключ из skiplist
-		return nil
+	valueToSave := writeKeyValue(nil, true)
+	if err := e.memTable.Put(key, valueToSave); err != nil {
+		return fmt.Errorf("lsm Delete: add record to l0: %w", err)
 	}
 
-	// TODO: страшная логика
+	e.memTableSize += len(key) + len(valueToSave)
+	if e.memTableSize > e.flushThreshold {
+		if err := e.flush(); err != nil {
+			return fmt.Errorf("lsm Put: flush memtable: %w", err)
+		}
+	}
 
-	return ErrNotImplemented
+	return nil
 }
 
 func (e *Engine) Scan(start []byte, end []byte) error {
+
 	return nil
 }
 
 func (e *Engine) Close() error {
 	walClosingError := e.walWriter.Close()
 	walFileClosingError := e.walFile.Close()
+
+	for i := 0; i < len(e.sstables); i++ {
+		for j := 0; j < len(e.sstables[i]); j++ {
+			el := e.sstables[i][j]
+			if err := el.file.Close(); err != nil {
+				return fmt.Errorf("lsm Close: closing sstable file %s: %w", el.file.Name(), err)
+			}
+		}
+	}
+
 	return errors.Join(walClosingError, walFileClosingError)
 }
 
@@ -269,9 +408,72 @@ func (e *Engine) flush() error {
 
 	e.sstables[0] = append(e.sstables[0], &tmp)
 
+	//if err := e.compaction(); err != nil {
+	//	return fmt.Errorf("lsm flush: compaction: %w", err)
+	//}
+
 	return nil
 }
 
-func (e *Engine) initWALWriter() error {
+func (e *Engine) compaction() error {
+	for levelIndex := 0; levelIndex < len(e.sstables); levelIndex++ {
+		levelNumber := levelIndex + 1
+		maxSSTablesNumber := int(math.Pow(T, float64(levelNumber)))
+
+		if len(e.sstables[levelIndex]) <= maxSSTablesNumber {
+			// На текущем уровне перегруз по количеству sstables
+			continue
+		}
+
+		if levelIndex == 0 {
+
+		} else {
+
+		}
+
+	}
+
 	return nil
+}
+
+func (e *Engine) findCandidates(key []byte, levelNumber int) []*lsmSSTable {
+	currentLevelTables := e.sstables[levelNumber-1]
+
+	if levelNumber == 1 {
+		return currentLevelTables
+	}
+
+	for _, t := range currentLevelTables {
+		r := t.reader
+		if bytes.Compare(r.GetFirstKey(), key) <= 0 && bytes.Compare(key, r.GetLastKey()) <= 0 {
+			res := make([]*lsmSSTable, 1)
+			res[0] = t
+			return res
+		}
+	}
+
+	return make([]*lsmSSTable, 0)
+}
+
+func doesIntercept(r1 *sstable.Reader, r2 *sstable.Reader) bool {
+	cond1 := bytes.Compare(r2.GetFirstKey(), r1.GetLastKey()) <= 0
+	cond2 := bytes.Compare(r1.GetFirstKey(), r2.GetLastKey()) <= 0
+	return cond1 && cond2
+}
+
+func extractKeyValue(buffer []byte) (value []byte, deleted bool) {
+	return buffer[1:], buffer[0] != 0
+}
+
+func writeKeyValue(value []byte, delete bool) []byte {
+	if delete {
+		res := make([]byte, 1)
+		res[0] = 1
+		return res
+	}
+
+	res := make([]byte, len(value)+1)
+	res[0] = 0 // Ключ не удалён
+	copy(res[1:], value)
+	return res
 }
