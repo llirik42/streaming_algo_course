@@ -7,6 +7,7 @@ import (
 	"log"
 	"math/rand"
 	"os"
+	"time"
 )
 
 func stringToBytes(s string) []byte {
@@ -101,5 +102,11 @@ func sstableDemo() {
 }
 
 func main() {
-	walDemo()
+	defer func() {
+		fmt.Printf("Exiting...\n")
+	}()
+
+	time.Sleep(3 * time.Second)
+
+	//walDemo()
 }

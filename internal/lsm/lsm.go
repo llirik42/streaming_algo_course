@@ -9,7 +9,7 @@ import (
 	"kvschool/internal/sstable"
 	"kvschool/internal/wal"
 	"log"
-	"math"
+	//"math"
 	"os"
 	"path"
 	"slices"
@@ -267,6 +267,7 @@ func Open(options Options) (*Engine, error) {
 	engine := &Engine{
 		memTable: skiplist.New(42),
 		sstables: make([][]*lsmSSTable, 1),
+		options:  options,
 	}
 
 	if !directoryExists(options.Dir) {
@@ -607,22 +608,39 @@ func (e *Engine) flush() error {
 }
 
 func (e *Engine) compaction() error {
-	for levelIndex := 0; levelIndex < len(e.sstables); levelIndex++ {
-		levelNumber := levelIndex + 1
-		maxSSTablesNumber := int(math.Pow(T, float64(levelNumber)))
-
-		if len(e.sstables[levelIndex]) <= maxSSTablesNumber {
-			// На текущем уровне перегруз по количеству sstables
-			continue
-		}
-
-		if levelIndex == 0 {
-
-		} else {
-
-		}
-
-	}
+	//for levelIndex := 0; levelIndex < len(e.sstables); levelIndex++ {
+	//	levelNumber := levelIndex + 1
+	//	maxSSTablesNumber := int(math.Pow(T, float64(levelNumber)))
+	//
+	//	if len(e.sstables[levelIndex]) <= maxSSTablesNumber {
+	//		// На текущем уровне нет перегруза по количеству sstables
+	//		continue
+	//	}
+	//
+	//	if levelIndex == len(e.sstables[levelIndex])-1 {
+	//		// Текущий уровень последний
+	//		// Тогда просто перемещаем первый sstable из текущего уровня на следующий
+	//		e.sstables = append(sstable)
+	//
+	//
+	//	}
+	//
+	//
+	//	// interceptionTable[i] -> массив lsmSSTable, с которыми пересекается i-ый sstable текущего уровня
+	//	interceptionTable = make([][]lsmSSTable, 0, )
+	//
+	//	if levelIndex == 0 {
+	//
+	//	} else {
+	//		sstablesWithInterception := make([]lsmSSTable, 0, len(e.sstables[levelIndex]))
+	//		for i := 0; i < len(e.sstables[levelIndex]); i++ {
+	//			if doesIntercept()
+	//		}
+	//
+	//
+	//	}
+	//
+	//}
 
 	return nil
 }

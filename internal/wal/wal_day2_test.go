@@ -1,4 +1,4 @@
-//go:build day2
+////go:build day2
 
 package wal
 
