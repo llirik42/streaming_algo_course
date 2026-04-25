@@ -172,7 +172,7 @@ func TestLSMStore_SingleKey(t *testing.T) {
 	expectedValue1 := StringToBytes("value")
 	expectedValue2 := StringToBytes("value2")
 	expectedValue3 := StringToBytes("value3")
-	anotherKey := StringToBytes("unknown key")
+	unknownKey := StringToBytes("unknown key")
 
 	// Хранилище до краша
 
@@ -184,7 +184,7 @@ func TestLSMStore_SingleKey(t *testing.T) {
 	// Потому что 13 - несчастливое число
 	for i := 0; i < 13; i++ {
 		nextEmpty(data, it1)
-		getNotFound(data, s1, anotherKey)
+		getNotFound(data, s1, unknownKey)
 	}
 	closeIteratorSuccess(data, it1)
 
@@ -195,7 +195,7 @@ func TestLSMStore_SingleKey(t *testing.T) {
 	// Потому что 13 - несчастливое число
 	for i := 0; i < 13; i++ {
 		nextEmpty(data, it2)
-		getNotFound(data, s1, anotherKey)
+		getNotFound(data, s1, unknownKey)
 	}
 	closeIteratorSuccess(data, it2)
 
@@ -212,7 +212,7 @@ func TestLSMStore_SingleKey(t *testing.T) {
 	// Потому что 13 - несчастливое число
 	for i := 0; i < 13; i++ {
 		nextEmpty(data, it3)
-		getNotFound(data, s2, anotherKey)
+		getNotFound(data, s2, unknownKey)
 	}
 	closeIteratorSuccess(data, it3)
 
@@ -223,7 +223,7 @@ func TestLSMStore_SingleKey(t *testing.T) {
 	// Потому что 13 - несчастливое число
 	for i := 0; i < 13; i++ {
 		nextEmpty(data, it4)
-		getNotFound(data, s2, anotherKey)
+		getNotFound(data, s2, unknownKey)
 	}
 	closeIteratorSuccess(data, it4)
 }

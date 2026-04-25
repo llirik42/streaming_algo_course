@@ -12,7 +12,6 @@ import (
 	//"math"
 	"os"
 	"path"
-	"slices"
 	"strconv"
 	"time"
 )
@@ -74,74 +73,88 @@ type pair struct {
 }
 
 type Iterator struct {
-	memTableIterator  iterator.Iterator
-	sstablesIterators [][]iterator.Iterator
-	pairs             []pair
-	toMove            pairSource
-	isEmpty           bool
+	memTableIterator     iterator.Iterator
+	moveMemTableIterator bool
+	sstablesIterators    [][]iterator.Iterator
+	sstablesCreationTime [][]time.Time
+	moveSSTables         [][]bool
+	pairs                []pair
+	toMove               pairSource
+	isEmpty              bool
 }
 
 func (it *Iterator) Next() (key []byte, value []byte, ok bool, err error) {
-	// TODO: нужно делать всё умнее: не просто добавлять в список пар, а проверять: если уже есть с таким ключом и от кого?
-
 	if it.isEmpty {
 		return nil, nil, false, nil
 	}
 
 	for {
-		memTableKey, memTableValue, memTableOk, memTableErr := it.memTableIterator.Next()
-		memTableSource := pairSource{
-			isMemTable: true,
-			levelIndex: 0,
-			index:      0,
-			iterator:   it.memTableIterator,
-		}
+		memTableOk := false
 
-		if memTableErr != nil {
-			return nil, nil, false, fmt.Errorf("%w", err)
-		}
+		if it.moveMemTableIterator {
+			memTableKey, memTableValue, memTableOkTmp, memTableErr := it.memTableIterator.Next()
+			memTableSource := pairSource{
+				isMemTable: true,
+				levelIndex: 0,
+				index:      0,
+				iterator:   it.memTableIterator,
+			}
 
-		if memTableOk {
-			found := false
+			memTableOk = memTableOkTmp
 
-			for i := 0; i < len(it.pairs); i++ {
-				previousPair := it.pairs[i]
-				previousSource := it.pairs[i].source
-				if bytes.Equal(previousPair.key, memTableKey) {
-					found = true
+			if memTableErr != nil {
+				return nil, nil, false, fmt.Errorf("%w", err)
+			}
 
-					// Мы более новые, поэтому меняем value по ключу
-					if compareSources(&memTableSource, &previousSource) > 0 {
-						it.pairs[i].value = memTableValue
+			if memTableOkTmp {
+				found := false
+
+				for i := 0; i < len(it.pairs); i++ {
+					previousPair := it.pairs[i]
+					previousSource := it.pairs[i].source
+					if bytes.Equal(previousPair.key, memTableKey) {
+						found = true
+
+						// Мы более новые, поэтому меняем value по ключу
+						if compareSources(&memTableSource, &previousSource) > 0 {
+							it.pairs[i].value = memTableValue
+						}
 					}
 				}
+
+				if !found {
+					it.pairs = append(it.pairs, pair{
+						key:   memTableKey,
+						value: memTableValue,
+						source: pairSource{
+							isMemTable: true,
+							levelIndex: 0,
+							index:      0,
+							iterator:   it.memTableIterator,
+						},
+					})
+				}
+			} else {
+				// TODO: оптимизировать! (если не ok, то дальше нет смысла вызывать Next для memTableIterator
 			}
 
-			if !found {
-				it.pairs = append(it.pairs, pair{
-					key:   memTableKey,
-					value: memTableValue,
-					source: pairSource{
-						isMemTable: true,
-						levelIndex: 0,
-						index:      0,
-						iterator:   it.memTableIterator,
-					},
-				})
-			}
-		} else {
-			// TODO: оптимизировать! (если не ok, то дальше нет смысла вызывать Next для memTableIterator
+			it.moveMemTableIterator = false
 		}
 
 		hasSSTablesToMove := false // true - есть ещё sstables, у которых можно продвинуться
 		for levelIndex := 0; levelIndex < len(it.sstablesIterators); levelIndex++ {
 			for index := 0; index < len(it.sstablesIterators[levelIndex]); index++ {
+				if !it.moveSSTables[levelIndex][index] {
+					continue
+				}
+
 				currentIterator := it.sstablesIterators[levelIndex][index]
 				currentSource := pairSource{
-					isMemTable: false,
-					levelIndex: levelIndex,
-					index:      index,
-					iterator:   currentIterator,
+					isMemTable:   false,
+					levelIndex:   levelIndex,
+					index:        index,
+					iterator:     currentIterator,
+					creationTime: it.sstablesCreationTime[levelIndex][index],
 				}
 
 				currentKey, currentValue, currentOk, currentErr := currentIterator.Next()
@@ -171,10 +184,11 @@ func (it *Iterator) Next() (key []byte, value []byte, ok bool, err error) {
 							key:   currentKey,
 							value: currentValue,
 							source: pairSource{
-								isMemTable: false,
-								levelIndex: levelIndex,
-								index:      index,
-								iterator:   currentIterator,
+								isMemTable:   false,
+								levelIndex:   levelIndex,
+								index:        index,
+								iterator:     currentIterator,
+								creationTime: it.sstablesCreationTime[levelIndex][index],
 							},
 						})
 					}
@@ -186,10 +200,21 @@ func (it *Iterator) Next() (key []byte, value []byte, ok bool, err error) {
 
 		sortPairs(it.pairs)
 
-		it.pairs = slices.DeleteFunc(it.pairs, func(p pair) bool {
+		pairsAfterDelete := it.pairs[:0]
+		for _, p := range it.pairs {
 			_, deleted := extractKeyValue(p.value)
-			return deleted
-		})
+			if !deleted {
+				pairsAfterDelete = append(pairsAfterDelete, p)
+			} else {
+				if p.source.isMemTable {
+					it.moveMemTableIterator = true
+				} else {
+					it.moveSSTables[p.source.levelIndex][p.source.index] = true
+				}
+			}
+		}
+
+		it.pairs = pairsAfterDelete
 
 		if len(it.pairs) == 0 {
 			if !memTableOk && !hasSSTablesToMove {
@@ -202,6 +227,12 @@ func (it *Iterator) Next() (key []byte, value []byte, ok bool, err error) {
 
 		firstPair := it.pairs[0]
 		it.pairs = it.pairs[1:]
+
+		if firstPair.source.isMemTable {
+			it.moveMemTableIterator = true
+		} else {
+			it.moveSSTables[firstPair.source.levelIndex][firstPair.source.index] = true
+		}
 
 		realValue, _ := extractKeyValue(firstPair.value)
 
@@ -317,11 +348,17 @@ func Open(options Options) (*Engine, error) {
 				return nil, fmt.Errorf("lsm Open: parsing creation time %s: %w", sstableFilePath, err)
 			}
 
-			engine.sstables[0] = append(engine.sstables[0], &lsmSSTable{
+			table := &lsmSSTable{
 				reader:       sstableReader,
 				file:         sstableFile,
 				creationTime: time.Unix(creationTimeUnix, 0),
-			})
+			}
+
+			if len(engine.sstables) == 0 {
+				engine.sstables = [][]*lsmSSTable{{table}}
+			} else {
+				engine.sstables[0] = append(engine.sstables[0], table)
+			}
 		}
 	}
 
@@ -446,12 +483,12 @@ func (e *Engine) Get(key []byte) ([]byte, error) {
 		return nil, ErrNotFound
 	}
 
-	for l := 1; l <= len(e.sstables); l++ {
-		candidates := e.findCandidates(key, l)
+	for levelNumber := 1; levelNumber <= len(e.sstables); levelNumber++ {
+		candidates := e.findCandidates(key, levelNumber)
 
 		// На текущем уровне нет кандидатов
 		if len(candidates) == 0 {
-			if l == len(e.sstables) {
+			if levelNumber == len(e.sstables) {
 				// Текущий уровень последний (значит в хранилище вообще ключа нет)
 				return nil, ErrNotFound
 			} else {
@@ -493,7 +530,7 @@ func (e *Engine) Get(key []byte) ([]byte, error) {
 		}
 	}
 
-	return nil, fmt.Errorf("lsm Get: unexpected path")
+	return nil, ErrNotFound
 }
 
 func (e *Engine) Delete(key []byte) error {
@@ -527,10 +564,19 @@ func (e *Engine) Scan(start []byte, end []byte) (iterator.Iterator, error) {
 		return nil, fmt.Errorf("lsm Scan: get memtable iterator: %w", err)
 	}
 
+	moveSSTables := make([][]bool, len(e.sstables))
+	creationTime := make([][]time.Time, len(e.sstables))
+
 	sstablesIterators := make([][]iterator.Iterator, len(e.sstables))
 	for i := 0; i < len(sstablesIterators); i++ {
 		sstablesIterators[i] = make([]iterator.Iterator, len(e.sstables[i]))
+		moveSSTables[i] = make([]bool, len(e.sstables[i]))
+		creationTime[i] = make([]time.Time, len(e.sstables[i]))
+
 		for j := 0; j < len(sstablesIterators[i]); j++ {
+			moveSSTables[i][j] = true
+			creationTime[i][j] = e.sstables[i][j].creationTime
+
 			sstablesIterators[i][j], err = e.sstables[i][j].reader.Iterator(start, end)
 			if err != nil {
 				return nil, fmt.Errorf("lsm Scan: get sstable iterator: %w", err)
@@ -539,8 +585,11 @@ func (e *Engine) Scan(start []byte, end []byte) (iterator.Iterator, error) {
 	}
 
 	return &Iterator{
-		memTableIterator:  memTableIterator,
-		sstablesIterators: sstablesIterators,
+		memTableIterator:     memTableIterator,
+		moveMemTableIterator: true,
+		sstablesIterators:    sstablesIterators,
+		moveSSTables:         moveSSTables,
+		sstablesCreationTime: creationTime,
 	}, nil
 }
 
