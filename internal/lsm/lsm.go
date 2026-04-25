@@ -27,10 +27,11 @@ const (
 )
 
 type pairSource struct {
-	isMemTable bool
-	levelIndex int
-	index      int
-	iterator   iterator.Iterator
+	isMemTable   bool
+	levelIndex   int
+	index        int
+	iterator     iterator.Iterator
+	creationTime time.Time
 }
 
 func compareSources(ps1 *pairSource, ps2 *pairSource) int {
@@ -48,8 +49,15 @@ func compareSources(ps1 *pairSource, ps2 *pairSource) int {
 	}
 
 	if ps1.levelIndex == ps2.levelIndex {
-		log.Fatalln("Comparing sstables on the same level")
-		return 0
+		if ps1.creationTime.Equal(ps2.creationTime) {
+			log.Fatalln("Comparing sstables on the same level with the same creation time")
+		}
+
+		if ps2.creationTime.Before(ps1.creationTime) {
+			return 1
+		}
+
+		return -1
 	}
 
 	if ps1.levelIndex < ps2.levelIndex {
@@ -238,11 +246,10 @@ type lsmSSTable struct {
 // Координирует работу Memtable, WAL и SSTables.
 // Отвечает за Compaction (сборку мусора).
 type Engine struct {
-	memTable       *skiplist.SkipList
-	memTableSize   int
-	sstables       [][]*lsmSSTable
-	flushThreshold int
-	options        Options
+	memTable     *skiplist.SkipList
+	memTableSize int
+	sstables     [][]*lsmSSTable
+	options      Options
 
 	walFile   *os.File
 	walWriter *wal.Writer
@@ -266,7 +273,7 @@ func Open(options Options) (*Engine, error) {
 
 	engine := &Engine{
 		memTable: skiplist.New(42),
-		sstables: make([][]*lsmSSTable, 1),
+		sstables: make([][]*lsmSSTable, 0),
 		options:  options,
 	}
 
@@ -374,12 +381,10 @@ func Open(options Options) (*Engine, error) {
 			}
 
 			if record.Type == wal.OpPut {
-				fmt.Printf("Put: %s-%s\n", record.Key, record.Value)
 				if err := engine.Put(record.Key, record.Value); err != nil {
 					return nil, fmt.Errorf("lsm Open: recovery crash put: %w", err)
 				}
 			} else {
-				fmt.Printf("Delete: %s-%s\n", record.Key, record.Value)
 				if err := engine.Delete(record.Key); err != nil {
 					return nil, fmt.Errorf("lsm Open: recovery crash delete: %w", err)
 				}
@@ -413,7 +418,7 @@ func (e *Engine) Put(key []byte, value []byte) error {
 	}
 
 	e.memTableSize += len(key) + len(valueToSave)
-	if e.memTableSize > e.flushThreshold {
+	if e.memTableSize > e.options.MemtableFlushThreshold {
 		if err := e.flush(); err != nil {
 			return fmt.Errorf("lsm Put: flush memtable: %w", err)
 		}
@@ -423,11 +428,22 @@ func (e *Engine) Put(key []byte, value []byte) error {
 }
 
 func (e *Engine) Get(key []byte) ([]byte, error) {
+	// Поиск в memtable
 	value, err := e.memTable.Get(key)
-
 	if err == nil {
 		// Нашли ключ в skiplist
-		return value, nil
+
+		realValue, deleted := extractKeyValue(value)
+		if deleted {
+			return nil, ErrNotFound
+		}
+
+		return realValue, nil
+	}
+
+	// Нет SSTables на диске
+	if len(e.sstables) == 0 {
+		return nil, ErrNotFound
 	}
 
 	for l := 1; l <= len(e.sstables); l++ {
@@ -477,7 +493,7 @@ func (e *Engine) Get(key []byte) ([]byte, error) {
 		}
 	}
 
-	return nil, fmt.Errorf("unexpected")
+	return nil, fmt.Errorf("lsm Get: unexpected path")
 }
 
 func (e *Engine) Delete(key []byte) error {
@@ -496,7 +512,7 @@ func (e *Engine) Delete(key []byte) error {
 	}
 
 	e.memTableSize += len(key) + len(valueToSave)
-	if e.memTableSize > e.flushThreshold {
+	if e.memTableSize > e.options.MemtableFlushThreshold {
 		if err := e.flush(); err != nil {
 			return fmt.Errorf("lsm Put: flush memtable: %w", err)
 		}
@@ -598,7 +614,12 @@ func (e *Engine) flush() error {
 		creationTime: now,
 	}
 
-	e.sstables[0] = append(e.sstables[0], &tmp)
+	if len(e.sstables) == 0 {
+		zeroLevelSSTables := []*lsmSSTable{&tmp}
+		e.sstables = append(e.sstables, zeroLevelSSTables)
+	} else {
+		e.sstables[0] = append(e.sstables[0], &tmp)
+	}
 
 	//if err := e.compaction(); err != nil {
 	//	return fmt.Errorf("lsm flush: compaction: %w", err)
