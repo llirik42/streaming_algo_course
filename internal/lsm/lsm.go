@@ -239,11 +239,12 @@ func (it *Iterator) Next() (key []byte, value []byte, ok bool, err error) {
 		}
 
 		realValue, deleted := extractKeyValue(firstPair.value)
-		if deleted {
-			if it.trackTombstones {
-				return firstPair.key, firstPair.value, true, nil
-			}
 
+		if it.trackTombstones {
+			return firstPair.key, firstPair.value, true, nil
+		}
+		
+		if deleted {
 			continue
 		}
 
@@ -532,13 +533,7 @@ func (e *Engine) Get(key []byte) ([]byte, error) {
 					continue
 				}
 
-				//realValue, deleted := extractKeyValue(foundValue)
-				//if deleted {
-				//	// Нашли информацию об удалении ключа
-				//	return nil, ErrNotFound
-				//}
-
-				// Нашли ключ без информации о его удалении
+				// Нашли ключ
 				foundValues = append(foundValues, foundValue)
 				foundValuesTime = append(foundValuesTime, c.creationTime)
 			}
@@ -733,6 +728,7 @@ func (e *Engine) flush() error {
 }
 
 func (e *Engine) compaction() error {
+	// TODO: для каждого уровня нужно проверять len(e.sstables) вручную! => переделать в цикл while
 	for levelIndex := 0; levelIndex < len(e.sstables); levelIndex++ {
 		levelNumber := levelIndex + 1
 		maxSSTablesNumber := int(math.Pow(T, float64(levelNumber)))
