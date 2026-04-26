@@ -343,7 +343,7 @@ func Open(options Options) (*Engine, error) {
 				return nil, fmt.Errorf("lsm Open: validating sstable file %s: %w", sstableFilePath, err)
 			}
 
-			creationTimeUnix, err := strconv.ParseInt(entry.Name(), 10, 64)
+			creationTimeUnixNano, err := strconv.ParseInt(entry.Name(), 10, 64)
 			if err != nil {
 				return nil, fmt.Errorf("lsm Open: parsing creation time %s: %w", sstableFilePath, err)
 			}
@@ -351,7 +351,7 @@ func Open(options Options) (*Engine, error) {
 			table := &lsmSSTable{
 				reader:       sstableReader,
 				file:         sstableFile,
-				creationTime: time.Unix(creationTimeUnix, 0),
+				creationTime: time.Unix(0, creationTimeUnixNano),
 			}
 
 			if len(engine.sstables) == 0 {
@@ -497,6 +497,9 @@ func (e *Engine) Get(key []byte) ([]byte, error) {
 			}
 		}
 
+		foundValues := make([][]byte, 0, len(candidates))
+		foundValuesTime := make([]time.Time, 0, len(candidates))
+
 		// Проходимся по кандидатам и проверяем, действительно ли в них есть искомый ключ
 		for _, c := range candidates {
 			it, err := c.reader.Iterator(nil, nil)
@@ -518,15 +521,42 @@ func (e *Engine) Get(key []byte) ([]byte, error) {
 					continue
 				}
 
-				realValue, deleted := extractKeyValue(foundValue)
-				if deleted {
-					// Нашли информацию об удалении ключа
-					return nil, ErrNotFound
-				}
+				//realValue, deleted := extractKeyValue(foundValue)
+				//if deleted {
+				//	// Нашли информацию об удалении ключа
+				//	return nil, ErrNotFound
+				//}
 
 				// Нашли ключ без информации о его удалении
-				return realValue, nil
+				foundValues = append(foundValues, foundValue)
+				foundValuesTime = append(foundValuesTime, c.creationTime)
 			}
+		}
+
+		if len(foundValues) == 0 {
+			if levelNumber == len(e.sstables) {
+				// Текущий уровень последний (значит в хранилище вообще ключа нет)
+				return nil, ErrNotFound
+			} else {
+				// Опускаемся на уровень ниже
+				continue
+			}
+		}
+
+		minTimeIndex := 0
+		minTime := foundValuesTime[0]
+		for i := 1; i < len(foundValues); i++ {
+			if foundValuesTime[i].After(minTime) {
+				minTime = foundValuesTime[i]
+				minTimeIndex = i
+			}
+		}
+
+		realValue, deleted := extractKeyValue(foundValues[minTimeIndex])
+		if deleted {
+			return nil, ErrNotFound
+		} else {
+			return realValue, nil
 		}
 	}
 
@@ -611,8 +641,8 @@ func (e *Engine) Close() error {
 
 func (e *Engine) flush() error {
 	now := time.Now()
-	nowUnix := now.Unix()
-	newSSTableName := strconv.FormatInt(nowUnix, 10)
+	nowUnixNano := now.UnixNano()
+	newSSTableName := strconv.FormatInt(nowUnixNano, 10)
 	newSSTablePath := path.Join(e.options.Dir, newSSTableName)
 
 	newSSTableFile, err := os.Create(newSSTablePath)
@@ -645,6 +675,7 @@ func (e *Engine) flush() error {
 	}
 
 	e.memTable.Clear()
+	e.memTableSize = 0
 	// TODO: очистить WAL?
 
 	stat, err := newSSTableFile.Stat()

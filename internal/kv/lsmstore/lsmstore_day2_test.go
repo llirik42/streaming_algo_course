@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	. "kvschool/internal/helpers"
 	"kvschool/internal/kv"
 	"kvschool/internal/lsm"
@@ -46,7 +47,7 @@ func getSuccess(data testData, store *Store, key, expectedValue []byte) {
 
 	value, err := store.Get(ctx, key)
 	if err != nil {
-		t.Fatalf("store Get failed: %v", err)
+		t.Fatalf("store Get failed on %s: %v", key, err)
 	}
 
 	if !bytes.Equal(value, expectedValue) {
@@ -134,6 +135,39 @@ func openStoreSuccess(data testData, dir string) *Store {
 		return nil
 	}
 	return store
+}
+
+func TestLSMStore_PersistAcrossRestart(t *testing.T) {
+	ctx := context.Background()
+	dir := filepath.Join(t.TempDir(), "db")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	s, err := Open(Options{Dir: dir})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := s.Put(ctx, []byte("a"), []byte("1")); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	s2, err := Open(Options{Dir: dir})
+	if err != nil {
+		t.Fatalf("Open2: %v", err)
+	}
+	defer s2.Close()
+
+	got, err := s2.Get(ctx, []byte("a"))
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if string(got) != "1" {
+		t.Fatalf("value mismatch: got=%q want=%q", string(got), "1")
+	}
 }
 
 func TestLSMStore_Empty(t *testing.T) {
@@ -313,35 +347,58 @@ func TestLSMStore_SingleKeyDeletion(t *testing.T) {
 	closeIteratorSuccess(data, it7)
 }
 
-//func TestLSMStore_PersistAcrossRestart(t *testing.T) {
-//	_ = context.Background()
-//	dir := filepath.Join(t.TempDir(), "db")
-//	if err := os.MkdirAll(dir, 0o755); err != nil {
-//		t.Fatalf("MkdirAll: %v", err)
-//	}
-//
-//	s, err := Open(Options{Dir: dir})
-//	if err != nil {
-//		t.Fatalf("Open: %v", err)
-//	}
-//	if err := s.Put(ctx, []byte("a"), []byte("1")); err != nil {
-//		t.Fatalf("Put: %v", err)
-//	}
-//	if err := s.Close(); err != nil {
-//		t.Fatalf("Close: %v", err)
-//	}
-//
-//	s2, err := Open(Options{Dir: dir})
-//	if err != nil {
-//		t.Fatalf("Open2: %v", err)
-//	}
-//	defer s2.Close()
-//
-//	got, err := s2.Get(ctx, []byte("a"))
-//	if err != nil {
-//		t.Fatalf("Get: %v", err)
-//	}
-//	if string(got) != "1" {
-//		t.Fatalf("value mismatch: got=%q want=%q", string(got), "1")
-//	}
-//}
+func TestLSMStore_MultipleKeysSmall(t *testing.T) {
+	data, dir := initTest(t)
+
+	// Хранилище до краша
+	s1 := openStoreSuccess(data, dir)
+
+	start := 100
+	end := 999
+
+	for i := start; i <= end; i++ {
+		key := StringToBytes(fmt.Sprintf("key%d", i))
+		value := StringToBytes(fmt.Sprintf("value%d", i))
+		putSuccess(data, s1, key, value)
+	}
+	for i := start; i <= end; i++ {
+		key := StringToBytes(fmt.Sprintf("key%d", i))
+		expectedValue := StringToBytes(fmt.Sprintf("value%d", i))
+		getSuccess(data, s1, key, expectedValue)
+	}
+	it1 := scanSuccess(data, s1, nil, nil)
+	for i := start; i <= end; i++ {
+		expectedKey := StringToBytes(fmt.Sprintf("key%d", i))
+		expectedValue := StringToBytes(fmt.Sprintf("value%d", i))
+		nextSuccess(data, it1, expectedKey, expectedValue)
+	}
+	// Потому что 13 - несчастливое число
+	for i := 0; i < 13; i++ {
+		nextEmpty(data, it1)
+	}
+	closeIteratorSuccess(data, it1)
+
+	//
+	// КРАШ
+	//
+
+	// Хранилище после краша
+	s2 := openStoreSuccess(data, dir)
+
+	for i := start; i <= end; i++ {
+		key := StringToBytes(fmt.Sprintf("key%d", i))
+		expectedValue := StringToBytes(fmt.Sprintf("value%d", i))
+		getSuccess(data, s2, key, expectedValue)
+	}
+	it2 := scanSuccess(data, s2, nil, nil)
+	for i := start; i <= end; i++ {
+		expectedKey := StringToBytes(fmt.Sprintf("key%d", i))
+		expectedValue := StringToBytes(fmt.Sprintf("value%d", i))
+		nextSuccess(data, it2, expectedKey, expectedValue)
+	}
+	// Потому что 13 - несчастливое число
+	for i := 0; i < 13; i++ {
+		nextEmpty(data, it2)
+	}
+	closeIteratorSuccess(data, it2)
+}

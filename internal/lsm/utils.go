@@ -7,7 +7,7 @@ import (
 
 func sortPairs(pairs []pair) {
 	by := func(p1, p2 *pair) bool {
-		return bytes.Equal(p1.key, p2.key)
+		return bytes.Compare(p1.key, p2.key) <= 0
 	}
 
 	ps := &pairSorter{
