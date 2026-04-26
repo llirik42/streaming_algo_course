@@ -805,16 +805,16 @@ func (e *Engine) compaction() error {
 				bottomIterators[0][curLevelIndex] = curIterator
 			}
 
-			for _, nextLevelIndex := range allNextLevelIndexes {
-				moveBottom[1][nextLevelIndex] = true
-				creationTime[1][nextLevelIndex] = e.sstables[levelIndex+1][nextLevelIndex].creationTime
+			for i, nextLevelIndex := range allNextLevelIndexes {
+				moveBottom[1][i] = true
+				creationTime[1][i] = e.sstables[levelIndex+1][nextLevelIndex].creationTime
 				curIterator, err := e.sstables[levelIndex+1][nextLevelIndex].reader.Iterator(nil, nil)
 				if err != nil {
 					// TODO: исправить сообщение
 					return fmt.Errorf("lsm compaction: get bottom iterator: %w", err)
 				}
 
-				bottomIterators[1][nextLevelIndex] = curIterator
+				bottomIterators[1][i] = curIterator
 			}
 
 			it := &Iterator{
@@ -924,19 +924,16 @@ func (e *Engine) compaction() error {
 			creationTime := make([][]time.Time, 1)
 			bottomIterators := make([][]iterator.Iterator, 1)
 
-			for i := 0; i < len(bottomIterators); i++ {
-				bottomIterators[i] = make([]iterator.Iterator, len(nextLevelSSTablesIndexes))
-				moveBottom[i] = make([]bool, len(nextLevelSSTablesIndexes))
-				creationTime[i] = make([]time.Time, len(nextLevelSSTablesIndexes))
+			bottomIterators[0] = make([]iterator.Iterator, len(nextLevelSSTablesIndexes))
+			moveBottom[0] = make([]bool, len(nextLevelSSTablesIndexes))
+			creationTime[0] = make([]time.Time, len(nextLevelSSTablesIndexes))
 
-				for j := 0; j < len(bottomIterators[i]); j++ {
-					moveBottom[i][j] = true
-					creationTime[i][j] = e.sstables[i][j].creationTime
-
-					bottomIterators[i][j], err = e.sstables[levelIndex+1][nextLevelSSTablesIndexes[j]].reader.Iterator(nil, nil)
-					if err != nil {
-						return fmt.Errorf("lsm compaction: get bottom iterator: %w", err)
-					}
+			for j := 0; j < len(nextLevelSSTablesIndexes); j++ {
+				moveBottom[0][j] = true
+				creationTime[0][j] = e.sstables[levelIndex+1][nextLevelSSTablesIndexes[j]].creationTime
+				bottomIterators[0][j], err = e.sstables[levelIndex+1][nextLevelSSTablesIndexes[j]].reader.Iterator(nil, nil)
+				if err != nil {
+					return fmt.Errorf("lsm compaction: get bottom iterator: %w", err)
 				}
 			}
 
