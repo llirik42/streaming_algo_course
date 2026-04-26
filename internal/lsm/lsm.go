@@ -80,6 +80,7 @@ type Iterator struct {
 	pairs                []pair
 	toMove               pairSource
 	isEmpty              bool
+	trackTombstones      bool
 }
 
 func (it *Iterator) Next() (key []byte, value []byte, ok bool, err error) {
@@ -239,6 +240,10 @@ func (it *Iterator) Next() (key []byte, value []byte, ok bool, err error) {
 
 		realValue, deleted := extractKeyValue(firstPair.value)
 		if deleted {
+			if it.trackTombstones {
+				return firstPair.key, firstPair.value, true, nil
+			}
+
 			continue
 		}
 
@@ -818,6 +823,7 @@ func (e *Engine) compaction() error {
 				sstablesIterators:    bottomIterators,
 				moveSSTables:         moveBottom,
 				sstablesCreationTime: creationTime,
+				trackTombstones:      true,
 			}
 
 			// TODO: копипаста с flush
@@ -940,6 +946,7 @@ func (e *Engine) compaction() error {
 				sstablesIterators:    bottomIterators,
 				moveSSTables:         moveBottom,
 				sstablesCreationTime: creationTime,
+				trackTombstones:      true,
 			}
 
 			// TODO: копипаста с flush
