@@ -10,6 +10,7 @@ import (
 	"kvschool/internal/wal"
 	"log"
 	"math"
+	"sort"
 
 	//"math"
 	"os"
@@ -23,6 +24,17 @@ var ErrNotFound = errors.New("lsm: ключ не найден")
 const (
 	T = 2
 )
+
+func removeByIndexes(slice []*lsmSSTable, indexes []int) []*lsmSSTable {
+	sort.Sort(sort.Reverse(sort.IntSlice(indexes)))
+
+	for _, i := range indexes {
+		if i >= 0 && i < len(slice) {
+			slice = append(slice[:i], slice[i+1:]...)
+		}
+	}
+	return slice
+}
 
 type pairSource struct {
 	isMemTable   bool
@@ -895,8 +907,8 @@ func (e *Engine) compaction() error {
 				if err := os.Remove(r.file.Name()); err != nil {
 					return fmt.Errorf("lsm compaction: removing sstable file: %w", err)
 				}
-				e.sstables[levelIndex+1] = append(e.sstables[levelIndex+1][:i], e.sstables[levelIndex+1][i+1:]...)
 			}
+			e.sstables[levelIndex+1] = removeByIndexes(e.sstables[levelIndex+1], allNextLevelIndexes)
 
 			// Добавляем новый sstable на след уровень
 			e.sstables[levelIndex+1] = append(e.sstables[levelIndex+1], newTable)
@@ -1014,9 +1026,8 @@ func (e *Engine) compaction() error {
 				if err := os.Remove(r.file.Name()); err != nil {
 					return fmt.Errorf("lsm compaction: removing sstable file: %w", err)
 				}
-
-				e.sstables[levelIndex+1] = append(e.sstables[levelIndex+1][:i], e.sstables[levelIndex+1][i+1:]...)
 			}
+			e.sstables[levelIndex+1] = removeByIndexes(e.sstables[levelIndex+1], nextLevelSSTablesIndexes)
 
 			// Добавляем новый sstable на след уровень
 			e.sstables[levelIndex+1] = append(e.sstables[levelIndex+1], newTable)
