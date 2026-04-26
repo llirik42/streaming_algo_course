@@ -192,6 +192,8 @@ func (it *Iterator) Next() (key []byte, value []byte, ok bool, err error) {
 								}
 
 								it.moveSSTables[previousSource.levelIndex][previousSource.index] = true
+							} else {
+								it.moveSSTables[currentSource.levelIndex][currentSource.index] = true
 							}
 						}
 					}
@@ -208,12 +210,12 @@ func (it *Iterator) Next() (key []byte, value []byte, ok bool, err error) {
 								creationTime: it.sstablesCreationTime[levelIndex][index],
 							},
 						})
+						it.moveSSTables[levelIndex][index] = false
 					}
 				} else {
 					// TODO: оптимизировать! (если не ok, то дальше нет смысла вызывать Next для (levelIndex, index)
 				}
 
-				it.moveSSTables[levelIndex][index] = false
 			}
 		}
 

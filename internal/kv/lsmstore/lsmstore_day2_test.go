@@ -109,10 +109,10 @@ func nextSuccess(data testData, iterator kv.Iterator, expectedKey, expectedValue
 	}
 
 	if !bytes.Equal(pair.Key, expectedKey) {
-		t.Fatalf("iterator Next(): expected %s, got %s", expectedKey, pair.Key)
+		t.Fatalf("iterator Next(): expected key %s, got %s", expectedKey, pair.Key)
 	}
 	if !bytes.Equal(pair.Value, expectedValue) {
-		t.Fatalf("iterator Next(): expected %s, got %s", expectedValue, pair.Value)
+		t.Fatalf("iterator Next(): expected value %s, got %s", expectedValue, pair.Value)
 	}
 }
 
@@ -518,7 +518,7 @@ func TestLSMStore_MultipleKeysSmallRange(t *testing.T) {
 
 func TestLSMStore_MultipleKeysLarge(t *testing.T) {
 	rng := rand.New(rand.NewSource(0))
-	keysNumber := 5
+	keysNumber := 100
 	actionsNumber := keysNumber * 10
 	maxKeyLength := 32
 	maxValueLength := 128
