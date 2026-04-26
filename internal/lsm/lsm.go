@@ -243,7 +243,7 @@ func (it *Iterator) Next() (key []byte, value []byte, ok bool, err error) {
 		if it.trackTombstones {
 			return firstPair.key, firstPair.value, true, nil
 		}
-		
+
 		if deleted {
 			continue
 		}
@@ -370,6 +370,12 @@ func Open(options Options) (*Engine, error) {
 				engine.sstables = [][]*lsmSSTable{{table}}
 			} else {
 				engine.sstables[0] = append(engine.sstables[0], table)
+			}
+		}
+
+		if len(engine.sstables) > 0 {
+			if err := engine.compaction(); err != nil {
+				return nil, fmt.Errorf("lsm Open: compaction sstable files: %w", err)
 			}
 		}
 	}
