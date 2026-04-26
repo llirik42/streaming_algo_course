@@ -22,7 +22,7 @@ import (
 var ErrNotFound = errors.New("lsm: ключ не найден")
 
 const (
-	T = 2
+	T = 10
 )
 
 func removeByIndexes(slice []*lsmSSTable, indexes []int) []*lsmSSTable {
@@ -925,6 +925,14 @@ func (e *Engine) compaction() error {
 				}
 			}
 
+			// Вообще нет пересечений со след уровнем. Просто перемещаем логически
+			if len(intersectionTable[minIntersectionIndex]) == 0 {
+				table := e.sstables[levelIndex][minIntersectionIndex]
+				e.sstables[levelIndex+1] = append(e.sstables[levelIndex+1], table)
+				e.sstables[levelIndex] = append(e.sstables[levelIndex][:minIntersectionIndex], e.sstables[levelIndex][minIntersectionIndex+1:]...)
+				return nil
+			}
+
 			currentLevelSSTable := e.sstables[levelIndex][minIntersectionIndex]
 			nextLevelSSTablesIndexes := intersectionTable[minIntersectionIndex]
 
@@ -1088,4 +1096,11 @@ func (e *Engine) Count() int {
 	}
 
 	return len(e.sstables[0])
+}
+
+func (e *Engine) Print() {
+	for i := 0; i < len(e.sstables); i++ {
+		fmt.Printf("%d: %d\n", i+1, len(e.sstables[i]))
+	}
+	fmt.Println()
 }

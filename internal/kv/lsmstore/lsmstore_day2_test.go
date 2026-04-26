@@ -457,7 +457,7 @@ func TestLSMStore_MultipleKeysTiny(t *testing.T) {
 	s2 = nil
 }
 
-func TestLSMStore_MultipleKeysSmall(t *testing.T) {
+func TestLSMStore_MultipleKeysSmallReversed(t *testing.T) {
 	data, dir := initTest(t)
 
 	// Хранилище до краша
@@ -614,8 +614,106 @@ func TestLSMStore_MultipleKeysSmallRange(t *testing.T) {
 }
 
 func TestLSMStore_MultipleKeysLarge(t *testing.T) {
+	data, dir := initTest(t)
+
+	// Хранилище до краша
+	s1 := openStoreSuccess(data, dir)
+
+	start := 100
+	end := 999
+
+	for i := start; i <= end; i++ {
+		key := StringToBytes(fmt.Sprintf("key%d", i))
+		value := StringToBytes(fmt.Sprintf("value%d", i))
+		putSuccess(data, s1, key, value)
+		//s1.Print()
+	}
+	for i := start; i <= end; i++ {
+		key := StringToBytes(fmt.Sprintf("key%d", i))
+		expectedValue := StringToBytes(fmt.Sprintf("value%d", i))
+		getSuccess(data, s1, key, expectedValue)
+	}
+	it1 := scanSuccess(data, s1, nil, nil)
+	for i := start; i <= end; i++ {
+		expectedKey := StringToBytes(fmt.Sprintf("key%d", i))
+		expectedValue := StringToBytes(fmt.Sprintf("value%d", i))
+		nextSuccess(data, it1, expectedKey, expectedValue)
+	}
+	// Потому что 13 - несчастливое число
+	for i := 0; i < 13; i++ {
+		nextEmpty(data, it1)
+	}
+	closeIteratorSuccess(data, it1)
+	it1 = nil
+	s1 = nil
+
+	//
+	// КРАШ
+	//
+
+	// Хранилище после краша
+	s2 := openStoreSuccess(data, dir)
+
+	for i := start; i <= end; i++ {
+		key := StringToBytes(fmt.Sprintf("key%d", i))
+		expectedValue := StringToBytes(fmt.Sprintf("value%d", i))
+		getSuccess(data, s2, key, expectedValue)
+	}
+	it2 := scanSuccess(data, s2, nil, nil)
+	for i := start; i <= end; i++ {
+		expectedKey := StringToBytes(fmt.Sprintf("key%d", i))
+		expectedValue := StringToBytes(fmt.Sprintf("value%d", i))
+		nextSuccess(data, it2, expectedKey, expectedValue)
+	}
+	// Потому что 13 - несчастливое число
+	for i := 0; i < 13; i++ {
+		nextEmpty(data, it2)
+	}
+	closeIteratorSuccess(data, it2)
+	it2 = nil
+	for i := start; i <= end; i++ {
+		key := StringToBytes(fmt.Sprintf("key%d", i))
+		deleteSuccess(data, s2, key)
+	}
+	for i := start; i <= end; i++ {
+		key := StringToBytes(fmt.Sprintf("key%d", i))
+		getNotFound(data, s2, key)
+	}
+	it3 := scanSuccess(data, s2, nil, nil)
+	// Потому что 13 - несчастливое число
+	for i := 0; i < 13; i++ {
+		nextEmpty(data, it3)
+	}
+	closeIteratorSuccess(data, it3)
+	it3 = nil
+	for i := end; i >= start; i-- {
+		key := StringToBytes(fmt.Sprintf("key%d", i))
+		value := StringToBytes(fmt.Sprintf("value%d", i))
+		putSuccess(data, s2, key, value)
+	}
+	for i := start; i <= end; i++ {
+		key := StringToBytes(fmt.Sprintf("key%d", i))
+		expectedValue := StringToBytes(fmt.Sprintf("value%d", i))
+		getSuccess(data, s2, key, expectedValue)
+	}
+	it4 := scanSuccess(data, s2, nil, nil)
+	for i := start; i <= end; i++ {
+		expectedKey := StringToBytes(fmt.Sprintf("key%d", i))
+		expectedValue := StringToBytes(fmt.Sprintf("value%d", i))
+		nextSuccess(data, it4, expectedKey, expectedValue)
+	}
+	// Потому что 13 - несчастливое число
+	for i := 0; i < 13; i++ {
+		nextEmpty(data, it4)
+	}
+	closeIteratorSuccess(data, it4)
+	it4 = nil
+	s2 = nil
+}
+
+func TestLSMStore_MultipleKeysLargeRandom(t *testing.T) {
 	rng := rand.New(rand.NewSource(0))
-	keysNumber := 100
+	keysNumber := 1000
 	actionsNumber := keysNumber * 10
 	maxKeyLength := 32
 	maxValueLength := 128
@@ -643,6 +741,7 @@ func TestLSMStore_MultipleKeysLarge(t *testing.T) {
 				v := StringToBytes(GenerateRandomString(maxValueLength, rng))
 				pairs[i] = kv.Pair{Key: k, Value: v}
 				putSuccess(data, s1, k, v)
+				//s1.Print()
 				break
 			}
 		}
@@ -668,7 +767,6 @@ func TestLSMStore_MultipleKeysLarge(t *testing.T) {
 
 	// Хранилище после краша
 	s2 := openStoreSuccess(data, dir)
-
 	for _, p := range pairs {
 		getSuccess(data, s2, p.Key, p.Value)
 	}
@@ -695,8 +793,8 @@ func TestLSMStore_MultipleKeysLarge(t *testing.T) {
 			pairs[keyIndex].Value = newValue
 		} else if module == 1 {
 			// Получаем значение существующего ключа
-			keyIndex := rng.Intn(len(pairs))
-			getSuccess(data, s2, pairs[keyIndex].Key, pairs[keyIndex].Value)
+			pairIndex := rng.Intn(len(pairs))
+			getSuccess(data, s2, pairs[pairIndex].Key, pairs[pairIndex].Value)
 		} else if module == 2 {
 			// Удаляем существующий ключ
 			keyIndex := rng.Intn(len(pairs))
