@@ -217,7 +217,7 @@ func (it *Iterator) Next() (key []byte, value []byte, ok bool, err error) {
 			}
 		}
 
-		sortPairs(it.pairs)
+		SortPairs(it.pairs)
 
 		if len(it.pairs) == 0 {
 			if !memTableOk && !hasSSTablesToMove {
@@ -791,4 +791,12 @@ func writeKeyValue(value []byte, delete bool) []byte {
 	res[0] = 0 // Ключ не удалён
 	copy(res[1:], value)
 	return res
+}
+
+func (e *Engine) Count() int {
+	if len(e.sstables) == 0 {
+		return 0
+	}
+
+	return len(e.sstables[0])
 }

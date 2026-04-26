@@ -11,6 +11,7 @@ import (
 	"kvschool/internal/kv"
 	"kvschool/internal/lsm"
 	. "kvschool/internal/testutil"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"testing"
@@ -52,7 +53,7 @@ func getSuccess(data testData, store *Store, key, expectedValue []byte) {
 	}
 
 	if !bytes.Equal(value, expectedValue) {
-		t.Fatalf("store Get failed: expected %s, got %s", expectedValue, value)
+		t.Fatalf("store Get failed on %s: expected %s, got %s", key, expectedValue, value)
 	}
 }
 
@@ -190,6 +191,7 @@ func TestLSMStore_Empty(t *testing.T) {
 	// Хранилище до краша
 	s1 := openStoreSuccess(data, dir)
 	testActions(s1)
+	s1 = nil
 
 	//
 	// КРАШ
@@ -198,6 +200,7 @@ func TestLSMStore_Empty(t *testing.T) {
 	// Хранилище после краша
 	s2 := openStoreSuccess(data, dir)
 	testActions(s2)
+	s2 = nil
 }
 
 func TestLSMStore_SingleKey(t *testing.T) {
@@ -222,7 +225,7 @@ func TestLSMStore_SingleKey(t *testing.T) {
 		getNotFound(data, s1, unknownKey)
 	}
 	closeIteratorSuccess(data, it1)
-
+	it1 = nil
 	putSuccess(data, s1, key, expectedValue2)
 	getSuccess(data, s1, key, expectedValue2)
 	it2 := scanSuccess(data, s1, nil, nil)
@@ -233,6 +236,8 @@ func TestLSMStore_SingleKey(t *testing.T) {
 		getNotFound(data, s1, unknownKey)
 	}
 	closeIteratorSuccess(data, it2)
+	it1 = nil
+	s1 = nil
 
 	//
 	// КРАШ
@@ -250,7 +255,7 @@ func TestLSMStore_SingleKey(t *testing.T) {
 		getNotFound(data, s2, unknownKey)
 	}
 	closeIteratorSuccess(data, it3)
-
+	it3 = nil
 	putSuccess(data, s2, key, expectedValue3)
 	getSuccess(data, s2, key, expectedValue3)
 	it4 := scanSuccess(data, s2, nil, nil)
@@ -261,6 +266,8 @@ func TestLSMStore_SingleKey(t *testing.T) {
 		getNotFound(data, s2, unknownKey)
 	}
 	closeIteratorSuccess(data, it4)
+	it4 = nil
+	s2 = nil
 }
 
 func TestLSMStore_SingleKeyDeletion(t *testing.T) {
@@ -283,6 +290,7 @@ func TestLSMStore_SingleKeyDeletion(t *testing.T) {
 		nextEmpty(data, it1)
 	}
 	closeIteratorSuccess(data, it1)
+	it1 = nil
 
 	deleteSuccess(data, s1, key)
 	getNotFound(data, s1, key)
@@ -292,17 +300,17 @@ func TestLSMStore_SingleKeyDeletion(t *testing.T) {
 		nextEmpty(data, it2)
 	}
 	closeIteratorSuccess(data, it2)
-
+	it2 = nil
 	putSuccess(data, s1, key, expectedValue2)
 	getSuccess(data, s1, key, expectedValue2)
 	it3 := scanSuccess(data, s1, nil, nil)
 	nextSuccess(data, it3, key, expectedValue2)
 	// Потому что 13 - несчастливое число
 	for i := 0; i < 13; i++ {
-		nextEmpty(data, it1)
+		nextEmpty(data, it3)
 	}
 	closeIteratorSuccess(data, it3)
-
+	it3 = nil
 	deleteSuccess(data, s1, key)
 	getNotFound(data, s1, key)
 	it4 := scanSuccess(data, s1, nil, nil)
@@ -311,6 +319,8 @@ func TestLSMStore_SingleKeyDeletion(t *testing.T) {
 		nextEmpty(data, it4)
 	}
 	closeIteratorSuccess(data, it4)
+	it4 = nil
+	s1 = nil
 
 	//
 	// КРАШ
@@ -327,7 +337,7 @@ func TestLSMStore_SingleKeyDeletion(t *testing.T) {
 		nextEmpty(data, it5)
 	}
 	closeIteratorSuccess(data, it5)
-
+	it5 = nil
 	putSuccess(data, s2, key, expectedValue3)
 	getSuccess(data, s2, key, expectedValue3)
 	it6 := scanSuccess(data, s2, nil, nil)
@@ -337,7 +347,7 @@ func TestLSMStore_SingleKeyDeletion(t *testing.T) {
 		nextEmpty(data, it6)
 	}
 	closeIteratorSuccess(data, it6)
-
+	it6 = nil
 	deleteSuccess(data, s2, key)
 	getNotFound(data, s2, key)
 	it7 := scanSuccess(data, s2, nil, nil)
@@ -346,6 +356,8 @@ func TestLSMStore_SingleKeyDeletion(t *testing.T) {
 		nextEmpty(data, it7)
 	}
 	closeIteratorSuccess(data, it7)
+	it7 = nil
+	s2 = nil
 }
 
 func TestLSMStore_MultipleKeysSmall(t *testing.T) {
@@ -378,6 +390,8 @@ func TestLSMStore_MultipleKeysSmall(t *testing.T) {
 		nextEmpty(data, it1)
 	}
 	closeIteratorSuccess(data, it1)
+	it1 = nil
+	s1 = nil
 
 	//
 	// КРАШ
@@ -402,7 +416,7 @@ func TestLSMStore_MultipleKeysSmall(t *testing.T) {
 		nextEmpty(data, it2)
 	}
 	closeIteratorSuccess(data, it2)
-
+	it2 = nil
 	for i := start; i <= end; i++ {
 		key := StringToBytes(fmt.Sprintf("key%d", i))
 		deleteSuccess(data, s2, key)
@@ -417,7 +431,7 @@ func TestLSMStore_MultipleKeysSmall(t *testing.T) {
 		nextEmpty(data, it3)
 	}
 	closeIteratorSuccess(data, it3)
-
+	it3 = nil
 	for i := end; i >= start; i-- {
 		key := StringToBytes(fmt.Sprintf("key%d", i))
 		value := StringToBytes(fmt.Sprintf("value%d", i))
@@ -439,6 +453,8 @@ func TestLSMStore_MultipleKeysSmall(t *testing.T) {
 		nextEmpty(data, it4)
 	}
 	closeIteratorSuccess(data, it4)
+	it4 = nil
+	s2 = nil
 }
 
 func TestLSMStore_MultipleKeysSmallRange(t *testing.T) {
@@ -478,6 +494,8 @@ func TestLSMStore_MultipleKeysSmallRange(t *testing.T) {
 		closeIteratorSuccess(data, iterator)
 	}
 
+	s1 = nil
+
 	//
 	// КРАШ
 	//
@@ -494,4 +512,139 @@ func TestLSMStore_MultipleKeysSmallRange(t *testing.T) {
 		TestKVIterator(t, iterator, startNumber, endNumber+1, step)
 		closeIteratorSuccess(data, iterator)
 	}
+
+	s2 = nil
+}
+
+func TestLSMStore_MultipleKeysLarge(t *testing.T) {
+	rng := rand.New(rand.NewSource(0))
+	keysNumber := 5
+	actionsNumber := keysNumber * 10
+	maxKeyLength := 32
+	maxValueLength := 128
+
+	data, dir := initTest(t)
+
+	// Хранилище до краша
+	s1 := openStoreSuccess(data, dir)
+
+	pairs := make([]kv.Pair, keysNumber)
+
+	for i := 0; i < keysNumber; i++ {
+		for {
+			k := StringToBytes(GenerateRandomString(maxKeyLength, rng))
+
+			exists := false
+			for _, p := range pairs {
+				if bytes.Compare(p.Key, k) == 0 {
+					exists = true
+					break
+				}
+			}
+
+			if !exists {
+				v := StringToBytes(GenerateRandomString(maxValueLength, rng))
+				pairs[i] = kv.Pair{Key: k, Value: v}
+				putSuccess(data, s1, k, v)
+				break
+			}
+		}
+	}
+	for _, p := range pairs {
+		getSuccess(data, s1, p.Key, p.Value)
+	}
+	sortPairs(pairs)
+	it1 := scanSuccess(data, s1, nil, nil)
+	for i := 0; i < keysNumber; i++ {
+		nextSuccess(data, it1, pairs[i].Key, pairs[i].Value)
+	}
+	for i := 0; i < 13; i++ {
+		nextEmpty(data, it1)
+	}
+	closeIteratorSuccess(data, it1)
+	it1 = nil
+	s1 = nil
+
+	//
+	// КРАШ
+	//
+
+	// Хранилище после краша
+	s2 := openStoreSuccess(data, dir)
+
+	for _, p := range pairs {
+		getSuccess(data, s2, p.Key, p.Value)
+	}
+	it2 := scanSuccess(data, s2, nil, nil)
+	for i := 0; i < keysNumber; i++ {
+		nextSuccess(data, it2, pairs[i].Key, pairs[i].Value)
+	}
+	for i := 0; i < 13; i++ {
+		nextEmpty(data, it2)
+	}
+	closeIteratorSuccess(data, it2)
+	it2 = nil
+
+	iterations := 0
+	for i := 0; i < actionsNumber && len(pairs) > 0; i++ {
+		iterations++
+		n := rng.Int()
+		module := n % 6
+		if module == 0 {
+			// Обновление значение существующего ключа
+			keyIndex := rng.Intn(len(pairs))
+			newValue := StringToBytes(GenerateRandomString(maxValueLength, rng))
+			putSuccess(data, s2, pairs[keyIndex].Key, newValue)
+			pairs[keyIndex].Value = newValue
+		} else if module == 1 {
+			// Получаем значение существующего ключа
+			keyIndex := rng.Intn(len(pairs))
+			getSuccess(data, s2, pairs[keyIndex].Key, pairs[keyIndex].Value)
+		} else if module == 2 {
+			// Удаляем существующий ключ
+			keyIndex := rng.Intn(len(pairs))
+			deleteSuccess(data, s2, pairs[keyIndex].Key)
+			pairs = append(pairs[:keyIndex], pairs[keyIndex+1:]...)
+		} else if module == 3 {
+			// Добавление ключа (возможно и обновление существующего)
+			k := StringToBytes(GenerateRandomString(maxKeyLength, rng))
+			v := StringToBytes(GenerateRandomString(maxValueLength, rng))
+			putSuccess(data, s2, k, v)
+
+			// Если ключ уже существует, обновляем срез pairs
+			indexOfPair := -1
+			for j, p := range pairs {
+				if bytes.Compare(p.Key, k) == 0 {
+					indexOfPair = j
+					break
+				}
+			}
+			if indexOfPair != -1 {
+				pairs[indexOfPair].Value = v
+			} else {
+				pairs = append(pairs, kv.Pair{Key: k, Value: v})
+			}
+		} else if module == 4 {
+			// Получение значение несуществующего ключа
+			unknownKey := StringToBytes(GenerateRandomStringFixed(maxKeyLength+1, rng))
+			getNotFound(data, s2, unknownKey)
+		}
+	}
+
+	t.Logf("Actions: %d/%d", iterations, actionsNumber)
+
+	for _, p := range pairs {
+		getSuccess(data, s2, p.Key, p.Value)
+	}
+	it3 := scanSuccess(data, s2, nil, nil)
+	sortPairs(pairs)
+	for i := 0; i < len(pairs); i++ {
+		nextSuccess(data, it3, pairs[i].Key, pairs[i].Value)
+	}
+	for i := 0; i < 13; i++ {
+		nextEmpty(data, it3)
+	}
+	closeIteratorSuccess(data, it3)
+	it3 = nil
+	s2 = nil
 }

@@ -13,7 +13,7 @@ import (
 var ErrNotImplemented = errors.New("lsmstore: функция не реализована")
 
 const (
-	MemtableFlushThreshold = 0
+	MemtableFlushThreshold = 1024 // 1 МБайт
 )
 
 type Iterator struct {
@@ -76,6 +76,10 @@ func (s *Store) Scan(_ context.Context, start []byte, end []byte) (kv.Iterator, 
 
 func (s *Store) Close() error {
 	return s.engine.Close()
+}
+
+func (s *Store) Count() int {
+	return s.engine.Count()
 }
 
 var _ kv.Store = (*Store)(nil)

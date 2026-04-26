@@ -1,13 +1,14 @@
-package lsm
+package lsmstore
 
 import (
 	"bytes"
+	"kvschool/internal/kv"
 	"sort"
 )
 
-func SortPairs(pairs []pair) {
-	by := func(p1, p2 *pair) bool {
-		return bytes.Compare(p1.key, p2.key) <= 0
+func sortPairs(pairs []kv.Pair) {
+	by := func(p1, p2 *kv.Pair) bool {
+		return bytes.Compare(p1.Key, p2.Key) <= 0
 	}
 
 	ps := &pairSorter{
@@ -18,8 +19,8 @@ func SortPairs(pairs []pair) {
 }
 
 type pairSorter struct {
-	pairs []pair
-	by    func(p1, p2 *pair) bool
+	pairs []kv.Pair
+	by    func(p1, p2 *kv.Pair) bool
 }
 
 func (s *pairSorter) Len() int {
