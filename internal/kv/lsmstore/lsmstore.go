@@ -13,7 +13,7 @@ import (
 var ErrNotImplemented = errors.New("lsmstore: функция не реализована")
 
 const (
-	MemtableFlushThreshold = 10000
+	MemtableFlushThreshold = 0
 )
 
 type Iterator struct {

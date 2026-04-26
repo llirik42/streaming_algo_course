@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"kvschool/internal/iterator"
+	"kvschool/internal/kv"
 	"testing"
 
 	. "kvschool/internal/helpers"
@@ -38,6 +39,37 @@ func TestIterator(t *testing.T, it iterator.Iterator, start, end, step int) {
 	// Потому что 13 - несчастливое число
 	for i := 0; i < 13; i++ {
 		_, _, ok, err := it.Next()
+		if err != nil {
+			t.Fatalf("Next: %v", err)
+		}
+		if ok {
+			t.Fatalf("Next expected not ok, got ok on %d", i)
+		}
+	}
+}
+
+func TestKVIterator(t *testing.T, it kv.Iterator, start, end, step int) {
+	for i := start; i < end; i += step {
+		expectedKey := StringToBytes(fmt.Sprintf("key-%d", i))
+		expectedValue := StringToBytes(fmt.Sprintf("value-%d", i))
+		pair, ok, err := it.Next()
+		if err != nil {
+			t.Fatalf("Next: %v", err)
+		}
+		if !ok {
+			t.Fatalf("Next: expected ok, got not ok on %d", i)
+		}
+		if !bytes.Equal(pair.Key, expectedKey) {
+			t.Fatalf("Next: expected key %s, got %s on %d", expectedKey, pair.Key, i)
+		}
+		if !bytes.Equal(pair.Value, expectedValue) {
+			t.Fatalf("Next: expected value %s, got %s on %d", expectedValue, pair.Value, i)
+		}
+	}
+
+	// Потому что 13 - несчастливое число
+	for i := 0; i < 13; i++ {
+		_, ok, err := it.Next()
 		if err != nil {
 			t.Fatalf("Next: %v", err)
 		}

@@ -10,6 +10,7 @@ import (
 	. "kvschool/internal/helpers"
 	"kvschool/internal/kv"
 	"kvschool/internal/lsm"
+	. "kvschool/internal/testutil"
 	"os"
 	"path/filepath"
 	"testing"
@@ -442,35 +443,40 @@ func TestLSMStore_MultipleKeysSmall(t *testing.T) {
 
 func TestLSMStore_MultipleKeysSmallRange(t *testing.T) {
 	data, dir := initTest(t)
+	start := 300
+	end := 800
+	step := 10
 
 	// Хранилище до краша
 	s1 := openStoreSuccess(data, dir)
 
-	start := 100
-	end := 999
-
-	for i := start; i <= end; i++ {
-		key := StringToBytes(fmt.Sprintf("key%d", i))
-		value := StringToBytes(fmt.Sprintf("value%d", i))
+	for i := end; i >= start; i -= step {
+		key := StringToBytes(fmt.Sprintf("key-%d", i))
+		value := StringToBytes(fmt.Sprintf("value-%d", i))
 		putSuccess(data, s1, key, value)
 	}
 
-	for i := start; i <= end; i++ {
-		key := StringToBytes(fmt.Sprintf("key%d", i))
-		expectedValue := StringToBytes(fmt.Sprintf("value%d", i))
-		getSuccess(data, s1, key, expectedValue)
+	cases := []TestCase{
+		{nil, nil, 300, 800},
+		{StringToBytes(fmt.Sprintf("key-300")), nil, 300, 800},
+		{StringToBytes(fmt.Sprintf("key-299")), nil, 300, 800},
+		{StringToBytes(fmt.Sprintf("key-301")), nil, 310, 800},
+		{nil, StringToBytes(fmt.Sprintf("key-800")), 300, 790},
+		{nil, StringToBytes(fmt.Sprintf("key-801")), 300, 800},
+		{nil, StringToBytes(fmt.Sprintf("key-799")), 300, 790},
+		{StringToBytes(fmt.Sprintf("key-300")), StringToBytes(fmt.Sprintf("key-800")), 300, 790},
+		{StringToBytes(fmt.Sprintf("key-400")), StringToBytes(fmt.Sprintf("key-700")), 400, 690},
 	}
-	it1 := scanSuccess(data, s1, nil, nil)
-	for i := start; i <= end; i++ {
-		expectedKey := StringToBytes(fmt.Sprintf("key%d", i))
-		expectedValue := StringToBytes(fmt.Sprintf("value%d", i))
-		nextSuccess(data, it1, expectedKey, expectedValue)
+
+	for _, c := range cases {
+		startKey := c.StartKey
+		endKey := c.EndKey
+		startNumber := c.StartNumber
+		endNumber := c.EndNumber
+		iterator := scanSuccess(data, s1, startKey, endKey)
+		TestKVIterator(t, iterator, startNumber, endNumber+1, step)
+		closeIteratorSuccess(data, iterator)
 	}
-	// Потому что 13 - несчастливое число
-	for i := 0; i < 13; i++ {
-		nextEmpty(data, it1)
-	}
-	closeIteratorSuccess(data, it1)
 
 	//
 	// КРАШ
@@ -479,20 +485,13 @@ func TestLSMStore_MultipleKeysSmallRange(t *testing.T) {
 	// Хранилище после краша
 	s2 := openStoreSuccess(data, dir)
 
-	for i := start; i <= end; i++ {
-		key := StringToBytes(fmt.Sprintf("key%d", i))
-		expectedValue := StringToBytes(fmt.Sprintf("value%d", i))
-		getSuccess(data, s2, key, expectedValue)
+	for _, c := range cases {
+		startKey := c.StartKey
+		endKey := c.EndKey
+		startNumber := c.StartNumber
+		endNumber := c.EndNumber
+		iterator := scanSuccess(data, s2, startKey, endKey)
+		TestKVIterator(t, iterator, startNumber, endNumber+1, step)
+		closeIteratorSuccess(data, iterator)
 	}
-	it2 := scanSuccess(data, s2, nil, nil)
-	for i := start; i <= end; i++ {
-		expectedKey := StringToBytes(fmt.Sprintf("key%d", i))
-		expectedValue := StringToBytes(fmt.Sprintf("value%d", i))
-		nextSuccess(data, it2, expectedKey, expectedValue)
-	}
-	// Потому что 13 - несчастливое число
-	for i := 0; i < 13; i++ {
-		nextEmpty(data, it2)
-	}
-	closeIteratorSuccess(data, it2)
 }
