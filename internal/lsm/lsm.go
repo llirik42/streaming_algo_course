@@ -118,6 +118,14 @@ func (it *Iterator) Next() (key []byte, value []byte, ok bool, err error) {
 						// Мы более новые, поэтому меняем value по ключу
 						if compareSources(&memTableSource, &previousSource) > 0 {
 							it.pairs[i].value = memTableValue
+							it.pairs[i].source = pairSource{
+								isMemTable: true,
+								levelIndex: 0,
+								index:      0,
+								iterator:   it.memTableIterator,
+							}
+
+							it.moveSSTables[previousSource.levelIndex][previousSource.index] = true
 						}
 					}
 				}
@@ -175,6 +183,15 @@ func (it *Iterator) Next() (key []byte, value []byte, ok bool, err error) {
 							// Мы более новые, поэтому меняем value по ключу
 							if compareSources(&currentSource, &previousSource) > 0 {
 								it.pairs[i].value = currentValue
+								it.pairs[i].source = pairSource{
+									isMemTable:   false,
+									levelIndex:   levelIndex,
+									index:        index,
+									iterator:     currentIterator,
+									creationTime: it.sstablesCreationTime[levelIndex][index],
+								}
+
+								it.moveSSTables[previousSource.levelIndex][previousSource.index] = true
 							}
 						}
 					}
@@ -195,26 +212,12 @@ func (it *Iterator) Next() (key []byte, value []byte, ok bool, err error) {
 				} else {
 					// TODO: оптимизировать! (если не ok, то дальше нет смысла вызывать Next для (levelIndex, index)
 				}
+
+				it.moveSSTables[levelIndex][index] = false
 			}
 		}
 
 		sortPairs(it.pairs)
-
-		pairsAfterDelete := it.pairs[:0]
-		for _, p := range it.pairs {
-			_, deleted := extractKeyValue(p.value)
-			if !deleted {
-				pairsAfterDelete = append(pairsAfterDelete, p)
-			} else {
-				if p.source.isMemTable {
-					it.moveMemTableIterator = true
-				} else {
-					it.moveSSTables[p.source.levelIndex][p.source.index] = true
-				}
-			}
-		}
-
-		it.pairs = pairsAfterDelete
 
 		if len(it.pairs) == 0 {
 			if !memTableOk && !hasSSTablesToMove {
@@ -227,14 +230,16 @@ func (it *Iterator) Next() (key []byte, value []byte, ok bool, err error) {
 
 		firstPair := it.pairs[0]
 		it.pairs = it.pairs[1:]
-
 		if firstPair.source.isMemTable {
 			it.moveMemTableIterator = true
 		} else {
 			it.moveSSTables[firstPair.source.levelIndex][firstPair.source.index] = true
 		}
 
-		realValue, _ := extractKeyValue(firstPair.value)
+		realValue, deleted := extractKeyValue(firstPair.value)
+		if deleted {
+			continue
+		}
 
 		return firstPair.key, realValue, true, nil
 	}
