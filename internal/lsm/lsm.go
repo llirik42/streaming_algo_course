@@ -22,7 +22,7 @@ import (
 var ErrNotFound = errors.New("lsm: ключ не найден")
 
 const (
-	T = 2
+	T = 10
 )
 
 func removeByIndexes(slice []*lsmSSTable, indexes []int) []*lsmSSTable {
@@ -1104,4 +1104,16 @@ func (e *Engine) Print() {
 		fmt.Printf("%d: %d\n", i+1, len(e.sstables[i]))
 	}
 	fmt.Println()
+}
+
+func (e *Engine) Test() {
+	for i := 1; i < len(e.sstables); i++ {
+		for j := 0; j < len(e.sstables[i]); j++ {
+			for k := j + 1; k < len(e.sstables[i]); k++ {
+				if doesIntersect(e.sstables[i][j].reader, e.sstables[i][k].reader) {
+					fmt.Printf("Intersection on level %d: %d-%d\n", i+1, j, k)
+				}
+			}
+		}
+	}
 }

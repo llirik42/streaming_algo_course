@@ -782,6 +782,8 @@ func TestLSMStore_MultipleKeysLargeRandom(t *testing.T) {
 
 	iterations := 0
 	for i := 0; i < actionsNumber && len(pairs) > 0; i++ {
+		s2.Test()
+
 		iterations++
 		n := rng.Int()
 		module := n % 6
@@ -789,22 +791,35 @@ func TestLSMStore_MultipleKeysLargeRandom(t *testing.T) {
 			// Обновление значение существующего ключа
 			keyIndex := rng.Intn(len(pairs))
 			newValue := StringToBytes(GenerateRandomString(maxValueLength, rng))
+			//t.Logf("Put: %s\n", pairs[keyIndex].Key)
 			putSuccess(data, s2, pairs[keyIndex].Key, newValue)
 			pairs[keyIndex].Value = newValue
 		} else if module == 1 {
 			// Получаем значение существующего ключа
 			pairIndex := rng.Intn(len(pairs))
-			getSuccess(data, s2, pairs[pairIndex].Key, pairs[pairIndex].Value)
+			//t.Logf("Get: %s\n", pairs[pairIndex].Key)
+
+			if bytes.Equal(pairs[pairIndex].Key, StringToBytes("mIqMij0vFOosTYsxRai7yfOK6AF6V")) {
+				getSuccess(data, s2, pairs[pairIndex].Key, pairs[pairIndex].Value)
+			} else {
+				getSuccess(data, s2, pairs[pairIndex].Key, pairs[pairIndex].Value)
+			}
 		} else if module == 2 {
 			// Удаляем существующий ключ
 			keyIndex := rng.Intn(len(pairs))
+			//t.Logf("Del: %s\n", pairs[keyIndex].Key)
 			deleteSuccess(data, s2, pairs[keyIndex].Key)
 			pairs = append(pairs[:keyIndex], pairs[keyIndex+1:]...)
 		} else if module == 3 {
 			// Добавление ключа (возможно и обновление существующего)
 			k := StringToBytes(GenerateRandomString(maxKeyLength, rng))
 			v := StringToBytes(GenerateRandomString(maxValueLength, rng))
-			putSuccess(data, s2, k, v)
+
+			if bytes.Equal(k, StringToBytes("mIqMij0vFOosTYsxRai7yfOK6AF6V")) {
+				putSuccess(data, s2, k, v)
+			} else {
+				putSuccess(data, s2, k, v)
+			}
 
 			// Если ключ уже существует, обновляем срез pairs
 			indexOfPair := -1
@@ -815,8 +830,10 @@ func TestLSMStore_MultipleKeysLargeRandom(t *testing.T) {
 				}
 			}
 			if indexOfPair != -1 {
+				//t.Logf("Upd: %s\n", k)
 				pairs[indexOfPair].Value = v
 			} else {
+				//t.Logf("New: %s\n", k)
 				pairs = append(pairs, kv.Pair{Key: k, Value: v})
 			}
 		} else if module == 4 {
