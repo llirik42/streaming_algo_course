@@ -626,7 +626,6 @@ func TestLSMStore_MultipleKeysLarge(t *testing.T) {
 		key := StringToBytes(fmt.Sprintf("key%d", i))
 		value := StringToBytes(fmt.Sprintf("value%d", i))
 		putSuccess(data, s1, key, value)
-		//s1.Print()
 	}
 	for i := start; i <= end; i++ {
 		key := StringToBytes(fmt.Sprintf("key%d", i))

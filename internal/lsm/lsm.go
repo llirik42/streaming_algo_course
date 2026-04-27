@@ -22,7 +22,7 @@ import (
 var ErrNotFound = errors.New("lsm: ключ не найден")
 
 const (
-	T = 10
+	T = 2
 )
 
 func removeByIndexes(slice []*lsmSSTable, indexes []int) []*lsmSSTable {
@@ -747,7 +747,11 @@ func (e *Engine) flush() error {
 
 func (e *Engine) compaction() error {
 	// TODO: для каждого уровня нужно проверять len(e.sstables) вручную! => переделать в цикл while
-	for levelIndex := 0; levelIndex < len(e.sstables); levelIndex++ {
+	for levelIndex := 0; ; levelIndex++ {
+		if levelIndex >= len(e.sstables) {
+			break
+		}
+
 		levelNumber := levelIndex + 1
 		maxSSTablesNumber := int(math.Pow(T, float64(levelNumber)))
 
@@ -762,7 +766,7 @@ func (e *Engine) compaction() error {
 			firstTable := e.sstables[levelIndex][0]
 			e.sstables[levelIndex] = e.sstables[levelIndex][1:] // TODO: оптимизировать!
 			e.sstables = append(e.sstables, []*lsmSSTable{firstTable})
-			continue
+			break
 		}
 
 		// interceptionTable[i] -> массив индексов lsmSSTable, с которыми пересекается i-ый sstable текущего уровня
@@ -912,9 +916,7 @@ func (e *Engine) compaction() error {
 
 			// Добавляем новый sstable на след уровень
 			e.sstables[levelIndex+1] = append(e.sstables[levelIndex+1], newTable)
-
-			return nil
-
+			continue
 		} else {
 			// Рассматриваем лишь одну таблицу текущего уровня (которая пересекается с наим числом таблиц следующего)
 
@@ -930,7 +932,7 @@ func (e *Engine) compaction() error {
 				table := e.sstables[levelIndex][minIntersectionIndex]
 				e.sstables[levelIndex+1] = append(e.sstables[levelIndex+1], table)
 				e.sstables[levelIndex] = append(e.sstables[levelIndex][:minIntersectionIndex], e.sstables[levelIndex][minIntersectionIndex+1:]...)
-				return nil
+				continue
 			}
 
 			currentLevelSSTable := e.sstables[levelIndex][minIntersectionIndex]
@@ -1040,7 +1042,7 @@ func (e *Engine) compaction() error {
 			// Добавляем новый sstable на след уровень
 			e.sstables[levelIndex+1] = append(e.sstables[levelIndex+1], newTable)
 
-			return nil
+			continue
 		}
 
 	}
