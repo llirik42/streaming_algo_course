@@ -675,6 +675,7 @@ func TestLSMStore_MultipleKeysLarge(t *testing.T) {
 		deleteSuccess(data, s2, key)
 	}
 	for i := start; i <= end; i++ {
+		fmt.Printf("%d/%d\n", i, end)
 		key := StringToBytes(fmt.Sprintf("key%d", i))
 		getNotFound(data, s2, key)
 	}

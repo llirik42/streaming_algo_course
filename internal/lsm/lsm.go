@@ -521,10 +521,10 @@ func (e *Engine) Get(key []byte) ([]byte, error) {
 			if levelNumber == len(e.sstables) {
 				// Текущий уровень последний (значит в хранилище вообще ключа нет)
 				return nil, ErrNotFound
-			} else {
-				// Опускаемся на уровень ниже
-				continue
 			}
+
+			// Опускаемся на уровень ниже
+			continue
 		}
 
 		foundValues := make([][]byte, 0, len(candidates))
@@ -891,7 +891,6 @@ func (e *Engine) compaction() error {
 			}
 
 			// Удаляем все sstable текущего уровня
-
 			for _, r := range e.sstables[levelIndex] {
 				if err := r.file.Close(); err != nil {
 					return fmt.Errorf("lsm compaction: closing sstable file: %w", err)
@@ -930,8 +929,8 @@ func (e *Engine) compaction() error {
 			// Вообще нет пересечений со след уровнем. Просто перемещаем логически
 			if len(intersectionTable[minIntersectionIndex]) == 0 {
 				table := e.sstables[levelIndex][minIntersectionIndex]
-				e.sstables[levelIndex+1] = append(e.sstables[levelIndex+1], table)
 				e.sstables[levelIndex] = append(e.sstables[levelIndex][:minIntersectionIndex], e.sstables[levelIndex][minIntersectionIndex+1:]...)
+				e.sstables[levelIndex+1] = append(e.sstables[levelIndex+1], table)
 				continue
 			}
 
