@@ -614,6 +614,8 @@ func TestLSMStore_MultipleKeysSmallRange(t *testing.T) {
 }
 
 func TestLSMStore_MultipleKeysLarge(t *testing.T) {
+	// TODO: тест не проходит при T=2 и MemtableFlushThreshold=0
+
 	data, dir := initTest(t)
 
 	// Хранилище до краша
@@ -712,6 +714,8 @@ func TestLSMStore_MultipleKeysLarge(t *testing.T) {
 }
 
 func TestLSMStore_MultipleKeysLargeRandom(t *testing.T) {
+	// TODO: тест не проходит при T=2 и MemtableFlushThreshold=0
+
 	rng := rand.New(rand.NewSource(0))
 	keysNumber := 1000
 	actionsNumber := keysNumber * 10
