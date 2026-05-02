@@ -55,7 +55,7 @@ func TestSkipList_ScanOrderAndRange(t *testing.T) {
 	defer func(it iterator.Iterator) {
 		err := it.Close()
 		if err != nil {
-			t.Fatalf("Remove iterator: %v", err)
+			t.Fatalf("Close iterator: %v", err)
 		}
 	}(it)
 
