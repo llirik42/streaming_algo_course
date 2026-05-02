@@ -41,7 +41,7 @@ func putSuccess(data testData, store *Store, key []byte, value []byte) {
 	t := data.t
 
 	if err := store.Put(ctx, key, value); err != nil {
-		t.Fatalf("store addToMemtable failed: %v", err)
+		t.Fatalf("store Put failed: %v", err)
 	}
 }
 
@@ -95,7 +95,7 @@ func closeIteratorSuccess(data testData, iterator kv.Iterator) {
 	t := data.t
 
 	if err := iterator.Close(); err != nil {
-		t.Fatalf("iterator Remove failed: %v", err)
+		t.Fatalf("iterator Close failed: %v", err)
 	}
 }
 
@@ -153,10 +153,10 @@ func TestLSMStore_PersistAcrossRestart(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	if err := s.Put(ctx, []byte("a"), []byte("1")); err != nil {
-		t.Fatalf("addToMemtable: %v", err)
+		t.Fatalf("Put: %v", err)
 	}
 	if err := s.Close(); err != nil {
-		t.Fatalf("Remove: %v", err)
+		t.Fatalf("Close: %v", err)
 	}
 
 	s2, err := Open(Options{Dir: dir})
@@ -794,14 +794,11 @@ func TestLSMStore_MultipleKeysLargeRandom(t *testing.T) {
 			// Обновление значение существующего ключа
 			keyIndex := rng.Intn(len(pairs))
 			newValue := StringToBytes(GenerateRandomString(maxValueLength, rng))
-			//t.Logf("addToMemtable: %s\n", pairs[keyIndex].Key)
 			putSuccess(data, s2, pairs[keyIndex].Key, newValue)
 			pairs[keyIndex].Value = newValue
 		} else if module == 1 {
 			// Получаем значение существующего ключа
 			pairIndex := rng.Intn(len(pairs))
-			//t.Logf("Get: %s\n", pairs[pairIndex].Key)
-
 			if bytes.Equal(pairs[pairIndex].Key, StringToBytes("mIqMij0vFOosTYsxRai7yfOK6AF6V")) {
 				getSuccess(data, s2, pairs[pairIndex].Key, pairs[pairIndex].Value)
 			} else {
@@ -810,7 +807,6 @@ func TestLSMStore_MultipleKeysLargeRandom(t *testing.T) {
 		} else if module == 2 {
 			// Удаляем существующий ключ
 			keyIndex := rng.Intn(len(pairs))
-			//t.Logf("Del: %s\n", pairs[keyIndex].Key)
 			deleteSuccess(data, s2, pairs[keyIndex].Key)
 			pairs = append(pairs[:keyIndex], pairs[keyIndex+1:]...)
 		} else if module == 3 {
@@ -833,10 +829,8 @@ func TestLSMStore_MultipleKeysLargeRandom(t *testing.T) {
 				}
 			}
 			if indexOfPair != -1 {
-				//t.Logf("Upd: %s\n", k)
 				pairs[indexOfPair].Value = v
 			} else {
-				//t.Logf("New: %s\n", k)
 				pairs = append(pairs, kv.Pair{Key: k, Value: v})
 			}
 		} else if module == 4 {
