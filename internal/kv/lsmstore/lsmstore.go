@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	MemtableFlushThreshold = 1024 * 1024
+	MemtableFlushThreshold = 0
 )
 
 type Iterator struct {
@@ -72,18 +72,6 @@ func (s *Store) Scan(_ context.Context, start []byte, end []byte) (kv.Iterator, 
 
 func (s *Store) Close() error {
 	return s.engine.Close()
-}
-
-func (s *Store) Count() int {
-	return s.engine.Count()
-}
-
-func (s *Store) Print() {
-	s.engine.Print()
-}
-
-func (s *Store) Test() {
-	s.engine.Test()
 }
 
 var _ kv.Store = (*Store)(nil)

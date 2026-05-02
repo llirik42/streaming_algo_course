@@ -48,7 +48,7 @@ func (w *Writer) Close() error {
 	recordsToAlign := NumberOfRecordInChecksum - w.currentChecksumRecordsNumber
 	for i := 0; i < recordsToAlign; i++ {
 		if err := w.Append(createGuardRecord()); err != nil {
-			return fmt.Errorf("wal Close: writing alignment record: %w", err)
+			return fmt.Errorf("wal Remove: writing alignment record: %w", err)
 		}
 	}
 

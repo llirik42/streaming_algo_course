@@ -95,7 +95,7 @@ func closeIteratorSuccess(data testData, iterator kv.Iterator) {
 	t := data.t
 
 	if err := iterator.Close(); err != nil {
-		t.Fatalf("iterator Close failed: %v", err)
+		t.Fatalf("iterator Remove failed: %v", err)
 	}
 }
 
@@ -156,7 +156,7 @@ func TestLSMStore_PersistAcrossRestart(t *testing.T) {
 		t.Fatalf("Put: %v", err)
 	}
 	if err := s.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
+		t.Fatalf("Remove: %v", err)
 	}
 
 	s2, err := Open(Options{Dir: dir})
@@ -787,8 +787,6 @@ func TestLSMStore_MultipleKeysLargeRandom(t *testing.T) {
 
 	iterations := 0
 	for i := 0; i < actionsNumber && len(pairs) > 0; i++ {
-		s2.Test()
-
 		iterations++
 		n := rng.Int()
 		module := n % 6
