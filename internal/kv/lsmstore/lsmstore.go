@@ -73,5 +73,3 @@ func (s *Store) Scan(_ context.Context, start []byte, end []byte) (kv.Iterator, 
 func (s *Store) Close() error {
 	return s.engine.Close()
 }
-
-var _ kv.Store = (*Store)(nil)

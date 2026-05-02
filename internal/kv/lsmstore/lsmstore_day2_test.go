@@ -1,4 +1,4 @@
-////go:build day2
+//go:build day2
 
 package lsmstore
 
@@ -41,7 +41,7 @@ func putSuccess(data testData, store *Store, key []byte, value []byte) {
 	t := data.t
 
 	if err := store.Put(ctx, key, value); err != nil {
-		t.Fatalf("store Put failed: %v", err)
+		t.Fatalf("store addToMemtable failed: %v", err)
 	}
 }
 
@@ -153,7 +153,7 @@ func TestLSMStore_PersistAcrossRestart(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	if err := s.Put(ctx, []byte("a"), []byte("1")); err != nil {
-		t.Fatalf("Put: %v", err)
+		t.Fatalf("addToMemtable: %v", err)
 	}
 	if err := s.Close(); err != nil {
 		t.Fatalf("Remove: %v", err)
@@ -794,7 +794,7 @@ func TestLSMStore_MultipleKeysLargeRandom(t *testing.T) {
 			// Обновление значение существующего ключа
 			keyIndex := rng.Intn(len(pairs))
 			newValue := StringToBytes(GenerateRandomString(maxValueLength, rng))
-			//t.Logf("Put: %s\n", pairs[keyIndex].Key)
+			//t.Logf("addToMemtable: %s\n", pairs[keyIndex].Key)
 			putSuccess(data, s2, pairs[keyIndex].Key, newValue)
 			pairs[keyIndex].Value = newValue
 		} else if module == 1 {

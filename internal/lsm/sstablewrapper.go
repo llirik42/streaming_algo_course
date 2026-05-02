@@ -1,6 +1,7 @@
 package lsm
 
 import (
+	"bytes"
 	"fmt"
 	"kvschool/internal/iterator"
 	"kvschool/internal/sstable"
@@ -98,6 +99,15 @@ func readSSTable(name, directory string) (*SSTableWrapper, error) {
 	}, nil
 }
 
+func doIntersect(w1 *SSTableWrapper, w2 *SSTableWrapper) bool {
+	r1 := w1.reader
+	r2 := w2.reader
+
+	cond1 := bytes.Compare(r2.GetFirstKey(), r1.GetLastKey()) <= 0
+	cond2 := bytes.Compare(r1.GetFirstKey(), r2.GetLastKey()) <= 0
+	return cond1 && cond2
+}
+
 func (w *SSTableWrapper) getReader() *sstable.Reader {
 	return w.reader
 }
@@ -108,7 +118,7 @@ func (w *SSTableWrapper) getCreationTime() time.Time {
 
 func (w *SSTableWrapper) Close() error {
 	if err := w.file.Close(); err != nil {
-		return fmt.Errorf("lsm SSTableWrapper.Remove(): closing file: %w", err)
+		return fmt.Errorf("lsm SSTableWrapper.Close(): closing file: %w", err)
 	}
 
 	return nil

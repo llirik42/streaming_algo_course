@@ -13,7 +13,7 @@ func TestStore_PutGetDelete(t *testing.T) {
 	t.Cleanup(func() { _ = s.Close() })
 
 	if err := s.Put(ctx, []byte("a"), []byte("1")); err != nil {
-		t.Fatalf("Put: %v", err)
+		t.Fatalf("addToMemtable: %v", err)
 	}
 	got, err := s.Get(ctx, []byte("a"))
 	if err != nil {
