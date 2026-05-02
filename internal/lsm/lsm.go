@@ -10,7 +10,6 @@ import (
 	"math"
 	"os"
 	"path"
-	"sort"
 	"time"
 )
 
@@ -21,35 +20,17 @@ const (
 	WALFileName = "wal"
 )
 
-func removeByIndexes(slice []*SSTableWrapper, indexes []int) []*SSTableWrapper {
-	sort.Sort(sort.Reverse(sort.IntSlice(indexes)))
-
-	for _, i := range indexes {
-		if i >= 0 && i < len(slice) {
-			slice = append(slice[:i], slice[i+1:]...)
-		}
-	}
-	return slice
-}
-
-// Options задаёт параметры LSM движка.
 type Options struct {
-	Dir string // Директория для хранения WAL и SSTables
-
-	// Максимальный размер Memtable перед сбросом на диск (flush).
-	// В телекоме это баланс между памятью и частотой I/O.
+	Dir                    string
 	MemtableFlushThreshold int
 }
 
-// Engine — основной движок CDR Storage.
-// Координирует работу Memtable, WAL и SSTables.
-// Отвечает за Compaction (сборку мусора).
 type Engine struct {
 	memtable               *skiplist.SkipList
 	memtableSize           int
 	memtableFlushThreshold int
 
-	sstables [][]*SSTableWrapper
+	tables [][]*SSTableWrapper
 
 	walFile   *os.File
 	walWriter *wal.Writer
@@ -57,25 +38,12 @@ type Engine struct {
 	directory string
 }
 
-func directoryExists(path string) bool {
-	info, err := os.Stat(path)
-	if os.IsNotExist(err) {
-		return false
-	}
-	return info.IsDir()
-}
-
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return !os.IsNotExist(err)
-}
-
 func Open(options Options) (*Engine, error) {
 	// TODO: многие return nil, fmt.errorf() заменить на предупреждение
 
 	engine := &Engine{
 		memtable:               skiplist.New(42),
-		sstables:               make([][]*SSTableWrapper, 0),
+		tables:                 make([][]*SSTableWrapper, 0),
 		directory:              options.Dir,
 		memtableFlushThreshold: options.MemtableFlushThreshold,
 	}
@@ -126,13 +94,13 @@ func (e *Engine) Get(key []byte) ([]byte, error) {
 	}
 
 	// Нет SSTables на диске
-	if !e.hasSSTables() {
+	if !e.hasTables() {
 		return nil, ErrNotFound
 	}
 
 	numberOfLevels := e.getNumberOfLevels()
 	for levelIndex := 0; levelIndex < e.getNumberOfLevels(); levelIndex++ {
-		candidates := e.findCandidates(key, levelIndex)
+		candidates := e.findKeyCandidates(key, levelIndex)
 		isLevelLast := levelIndex == numberOfLevels-1
 
 		foundAugmentedValue := make([][]byte, 0, len(candidates))
@@ -217,37 +185,27 @@ func (e *Engine) Delete(key []byte) error {
 }
 
 func (e *Engine) Scan(start []byte, end []byte) (iterator.Iterator, error) {
-	memTableIterator, err := e.memtable.Scan(start, end)
+	topLevelSource, err := createMemtablePairSource(e, start, end)
 	if err != nil {
-		return nil, fmt.Errorf("lsm Scan: get memtable iterator: %w", err)
+		return nil, fmt.Errorf("lsm Scan: creating memtable pair source: %w", err)
 	}
 
-	moveSSTables := make([][]bool, len(e.sstables))
-	creationTime := make([][]time.Time, len(e.sstables))
+	bottomLevelSources := make([][]*pairSource, e.getNumberOfLevels())
+	for levelIndex := 0; levelIndex < e.getNumberOfLevels(); levelIndex++ {
+		bottomLevelSources[levelIndex] = make([]*pairSource, e.getNumberOfTables(levelIndex))
 
-	sstablesIterators := make([][]iterator.Iterator, len(e.sstables))
-	for i := 0; i < len(sstablesIterators); i++ {
-		sstablesIterators[i] = make([]iterator.Iterator, len(e.sstables[i]))
-		moveSSTables[i] = make([]bool, len(e.sstables[i]))
-		creationTime[i] = make([]time.Time, len(e.sstables[i]))
+		for index := 0; index < e.getNumberOfTables(levelIndex); index++ {
+			bottomLevelSources[levelIndex][index], err = createSSTablePairSource(e, levelIndex, index, start, end)
 
-		for j := 0; j < len(sstablesIterators[i]); j++ {
-			moveSSTables[i][j] = true
-			creationTime[i][j] = e.sstables[i][j].getCreationTime()
-
-			sstablesIterators[i][j], err = e.sstables[i][j].getReader().Iterator(start, end)
 			if err != nil {
-				return nil, fmt.Errorf("lsm Scan: get sstable iterator: %w", err)
+				return nil, fmt.Errorf("lsm Scan: creating sstable pair source: %w", err)
 			}
 		}
 	}
 
 	return &Iterator{
-		memTableIterator:     memTableIterator,
-		moveMemTableIterator: true,
-		sstablesIterators:    sstablesIterators,
-		moveSSTables:         moveSSTables,
-		sstablesCreationTime: creationTime,
+		topLevelSource:     topLevelSource,
+		bottomLevelSources: bottomLevelSources,
 	}, nil
 }
 
@@ -256,7 +214,7 @@ func (e *Engine) Close() error {
 	walFileClosingError := e.walFile.Close()
 
 	for i := 0; i < e.getNumberOfLevels(); i++ {
-		for j, sstableWrapper := range e.getSSTables(i) {
+		for j, sstableWrapper := range e.getTables(i) {
 			if err := sstableWrapper.Close(); err != nil {
 				return fmt.Errorf("lsm Close: closing sstable file %d-%d: %w", i, j, err)
 			}
@@ -282,19 +240,16 @@ func (e *Engine) flush() error {
 
 	// Очистка WAL
 	if err := e.walWriter.Close(); err != nil {
-		return fmt.Errorf("lsm flush: closing wal writer: %w", err)
+		return fmt.Errorf("lsm flush: closing WAL writer: %w", err)
 	}
 	if err := e.walFile.Close(); err != nil {
-		return fmt.Errorf("lsm flush: closing wal file: %w", err)
+		return fmt.Errorf("lsm flush: closing WAL file: %w", err)
 	}
-	walFile, err := os.Create(path.Join(e.directory, "wal"))
-	if err != nil {
-		return fmt.Errorf("lsm flush: creating wal file: %w", err)
+	if err := e.initWAL(); err != nil {
+		return fmt.Errorf("lsm flush: resetting WAL: %w", err)
 	}
-	e.walFile = walFile
-	e.walWriter = wal.NewWriter(walFile)
 
-	e.addSSTableToFirstLevel(sstableWrapper)
+	e.pushTable(sstableWrapper)
 
 	if err := e.compaction(); err != nil {
 		return fmt.Errorf("lsm flush: compaction: %w", err)
@@ -314,31 +269,35 @@ func (e *Engine) flushIfNeeded() error {
 }
 
 func (e *Engine) compaction() error {
+	if 2 == 2 {
+		return nil
+	}
+
 	for levelIndex := 0; levelIndex < e.getNumberOfLevels(); levelIndex++ {
 		levelNumber := levelIndex + 1
 		maxSSTablesNumber := int(math.Pow(T, float64(levelNumber)))
 
-		if len(e.sstables[levelIndex]) <= maxSSTablesNumber {
+		if len(e.tables[levelIndex]) <= maxSSTablesNumber {
 			// На текущем уровне нет перегруза по количеству sstables
 			continue
 		}
 
-		if levelIndex == len(e.sstables)-1 {
+		if levelIndex == len(e.tables)-1 {
 			// Текущий уровень последний
 			// Тогда просто перемещаем первый sstable из текущего уровня на следующий
-			firstTable := e.sstables[levelIndex][0]
-			e.sstables[levelIndex] = e.sstables[levelIndex][1:] // TODO: оптимизировать!
-			e.sstables = append(e.sstables, []*SSTableWrapper{firstTable})
+			firstTable := e.tables[levelIndex][0]
+			e.tables[levelIndex] = e.tables[levelIndex][1:] // TODO: оптимизировать!
+			e.tables = append(e.tables, []*SSTableWrapper{firstTable})
 			break
 		}
 
 		// interceptionTable[i] -> массив индексов SSTableWrapper, с которыми пересекается i-ый sstable текущего уровня
-		intersectionTable := make([][]int, len(e.sstables[levelIndex]))
+		intersectionTable := make([][]int, len(e.tables[levelIndex]))
 
-		for curLevelIndex := 0; curLevelIndex < len(e.sstables[levelIndex]); curLevelIndex++ {
-			for nextLevelIndex := 0; nextLevelIndex < len(e.sstables[levelIndex+1]); nextLevelIndex++ {
+		for curLevelIndex := 0; curLevelIndex < len(e.tables[levelIndex]); curLevelIndex++ {
+			for nextLevelIndex := 0; nextLevelIndex < len(e.tables[levelIndex+1]); nextLevelIndex++ {
 				// Есть пересечение
-				if !doIntersect(e.sstables[levelIndex][curLevelIndex], e.sstables[levelIndex+1][nextLevelIndex]) {
+				if !doIntersect(e.tables[levelIndex][curLevelIndex], e.tables[levelIndex+1][nextLevelIndex]) {
 					continue
 				}
 
@@ -351,7 +310,7 @@ func (e *Engine) compaction() error {
 
 			var allNextLevelIndexesMap = map[int]int{}
 
-			for curLevelIndex := 0; curLevelIndex < len(e.sstables[levelIndex]); curLevelIndex++ {
+			for curLevelIndex := 0; curLevelIndex < len(e.tables[levelIndex]); curLevelIndex++ {
 				for _, i := range intersectionTable[levelIndex] {
 					allNextLevelIndexesMap[i] = i
 				}
@@ -362,49 +321,30 @@ func (e *Engine) compaction() error {
 				allNextLevelIndexes = append(allNextLevelIndexes, i)
 			}
 
-			moveBottom := make([][]bool, 2)
-			creationTime := make([][]time.Time, 2)
-			bottomIterators := make([][]iterator.Iterator, 2)
+			bottomLevelSources := make([][]*pairSource, 2)
+			bottomLevelSources[0] = make([]*pairSource, e.getNumberOfTables(levelIndex))
+			bottomLevelSources[1] = make([]*pairSource, len(allNextLevelIndexes))
 
-			moveBottom[0] = make([]bool, len(e.sstables[levelIndex]))
-			creationTime[0] = make([]time.Time, len(e.sstables[levelIndex]))
-			bottomIterators[0] = make([]iterator.Iterator, len(e.sstables[levelIndex]))
-
-			moveBottom[1] = make([]bool, len(allNextLevelIndexes))
-			creationTime[1] = make([]time.Time, len(allNextLevelIndexes))
-			bottomIterators[1] = make([]iterator.Iterator, len(allNextLevelIndexes))
-
-			for curLevelIndex := 0; curLevelIndex < len(e.sstables[levelIndex]); curLevelIndex++ {
-				moveBottom[0][curLevelIndex] = true
-				creationTime[0][curLevelIndex] = e.sstables[levelIndex][curLevelIndex].getCreationTime()
-				curIterator, err := e.sstables[levelIndex][curLevelIndex].getReader().Iterator(nil, nil)
+			for index := 0; index < e.getNumberOfTables(levelIndex); index++ {
+				ps, err := createSSTablePairSource(e, levelIndex, index, nil, nil)
 				if err != nil {
-					// TODO: исправить сообщение
-					return fmt.Errorf("lsm compaction: get bottom iterator: %w", err)
+					return fmt.Errorf("lsm compaction: create sstable pair source %d-%d: %w", levelIndex, index, err)
 				}
-
-				bottomIterators[0][curLevelIndex] = curIterator
+				bottomLevelSources[0][index] = ps
 			}
 
-			for i, nextLevelIndex := range allNextLevelIndexes {
-				moveBottom[1][i] = true
-				creationTime[1][i] = e.sstables[levelIndex+1][nextLevelIndex].getCreationTime()
-				curIterator, err := e.sstables[levelIndex+1][nextLevelIndex].getReader().Iterator(nil, nil)
+			nextLevelIndex := levelIndex + 1
+			for i, tableIndex := range allNextLevelIndexes {
+				ps, err := createSSTablePairSource(e, nextLevelIndex, tableIndex, nil, nil)
 				if err != nil {
-					// TODO: исправить сообщение
-					return fmt.Errorf("lsm compaction: get bottom iterator: %w", err)
+					return fmt.Errorf("lsm compaction: create sstable pair source %d-%d: %w", nextLevelIndex, tableIndex, err)
 				}
-
-				bottomIterators[1][i] = curIterator
+				bottomLevelSources[1][i] = ps
 			}
 
 			it := &Iterator{
-				memTableIterator:     nil,
-				moveMemTableIterator: false,
-				sstablesIterators:    bottomIterators,
-				moveSSTables:         moveBottom,
-				sstablesCreationTime: creationTime,
-				trackTombstones:      true,
+				bottomLevelSources: bottomLevelSources,
+				trackTombstones:    true,
 			}
 
 			// TODO: копипаста с flush
@@ -415,24 +355,24 @@ func (e *Engine) compaction() error {
 			}
 
 			// Удаляем все sstable текущего уровня
-			for _, r := range e.sstables[levelIndex] {
+			for _, r := range e.tables[levelIndex] {
 				if err := r.Remove(); err != nil {
 					return fmt.Errorf("lsm compaction: removing sstable file: %w", err)
 				}
 			}
-			e.sstables[levelIndex] = e.sstables[levelIndex][:0]
+			e.tables[levelIndex] = e.tables[levelIndex][:0]
 
 			// Удаляем sstable следующего уровня
 			for _, i := range allNextLevelIndexes {
-				r := e.sstables[levelIndex+1][i]
+				r := e.tables[levelIndex+1][i]
 				if err := r.Remove(); err != nil {
 					return fmt.Errorf("lsm compaction: removing sstable file: %w", err)
 				}
 			}
-			e.sstables[levelIndex+1] = removeByIndexes(e.sstables[levelIndex+1], allNextLevelIndexes)
+			e.tables[levelIndex+1] = removeByIndexes(e.tables[levelIndex+1], allNextLevelIndexes)
 
 			// Добавляем новый sstable на след уровень
-			e.sstables[levelIndex+1] = append(e.sstables[levelIndex+1], sstableWrapper)
+			e.tables[levelIndex+1] = append(e.tables[levelIndex+1], sstableWrapper)
 			continue
 		} else {
 			// Рассматриваем лишь одну таблицу текущего уровня (которая пересекается с наим числом таблиц следующего)
@@ -446,45 +386,37 @@ func (e *Engine) compaction() error {
 
 			// Вообще нет пересечений со след уровнем. Просто перемещаем логически
 			if len(intersectionTable[minIntersectionIndex]) == 0 {
-				table := e.sstables[levelIndex][minIntersectionIndex]
-				e.sstables[levelIndex] = append(e.sstables[levelIndex][:minIntersectionIndex], e.sstables[levelIndex][minIntersectionIndex+1:]...)
-				e.sstables[levelIndex+1] = append(e.sstables[levelIndex+1], table)
+				table := e.tables[levelIndex][minIntersectionIndex]
+				e.tables[levelIndex] = append(e.tables[levelIndex][:minIntersectionIndex], e.tables[levelIndex][minIntersectionIndex+1:]...)
+				e.tables[levelIndex+1] = append(e.tables[levelIndex+1], table)
 				continue
 			}
 
-			currentLevelSSTable := e.sstables[levelIndex][minIntersectionIndex]
 			nextLevelSSTablesIndexes := intersectionTable[minIntersectionIndex]
 
 			// TODO: копипаста с Next
-			topIterator, err := currentLevelSSTable.getReader().Iterator(nil, nil)
+			bottomLevelSources := make([][]*pairSource, 2)
+
+			ps, err := createSSTablePairSource(e, levelIndex, minIntersectionIndex, nil, nil)
 			if err != nil {
-				return fmt.Errorf("lsm compaction: get top iterator: %w", err)
+				return fmt.Errorf("lsm compaction: creating sstable pair source %d-%d: %w", levelIndex, minIntersectionIndex, err)
 			}
+			bottomLevelSources[0] = []*pairSource{ps}
 
-			moveBottom := make([][]bool, 1)
-			creationTime := make([][]time.Time, 1)
-			bottomIterators := make([][]iterator.Iterator, 1)
+			bottomLevelSources[1] = make([]*pairSource, len(nextLevelSSTablesIndexes))
 
-			bottomIterators[0] = make([]iterator.Iterator, len(nextLevelSSTablesIndexes))
-			moveBottom[0] = make([]bool, len(nextLevelSSTablesIndexes))
-			creationTime[0] = make([]time.Time, len(nextLevelSSTablesIndexes))
-
-			for j := 0; j < len(nextLevelSSTablesIndexes); j++ {
-				moveBottom[0][j] = true
-				creationTime[0][j] = e.sstables[levelIndex+1][nextLevelSSTablesIndexes[j]].getCreationTime()
-				bottomIterators[0][j], err = e.sstables[levelIndex+1][nextLevelSSTablesIndexes[j]].getReader().Iterator(nil, nil)
+			nextLevelIndex := levelIndex + 1
+			for index := 0; index < len(nextLevelSSTablesIndexes); index++ {
+				ps, err := createSSTablePairSource(e, nextLevelIndex, index, nil, nil)
 				if err != nil {
-					return fmt.Errorf("lsm compaction: get bottom iterator: %w", err)
+					return fmt.Errorf("lsm compaction: creating sstable pair source %d-%d: %w", nextLevelIndex, index, err)
 				}
+				bottomLevelSources[1][index] = ps
 			}
 
 			it := &Iterator{
-				memTableIterator:     topIterator,
-				moveMemTableIterator: true,
-				sstablesIterators:    bottomIterators,
-				moveSSTables:         moveBottom,
-				sstablesCreationTime: creationTime,
-				trackTombstones:      true,
+				bottomLevelSources: bottomLevelSources,
+				trackTombstones:    true,
 			}
 
 			// TODO: копипаста с flush
@@ -495,23 +427,23 @@ func (e *Engine) compaction() error {
 			}
 
 			// Удаляем sstable с текущего уровня
-			r := e.sstables[levelIndex][minIntersectionIndex]
+			r := e.tables[levelIndex][minIntersectionIndex]
 			if err := r.Remove(); err != nil {
 				return fmt.Errorf("lsm compaction: removing sstable file: %w", err)
 			}
-			e.sstables[levelIndex] = append(e.sstables[levelIndex][:minIntersectionIndex], e.sstables[levelIndex][minIntersectionIndex+1:]...)
+			e.tables[levelIndex] = append(e.tables[levelIndex][:minIntersectionIndex], e.tables[levelIndex][minIntersectionIndex+1:]...)
 
 			// Удаляем sstable следующего уровня
 			for _, i := range nextLevelSSTablesIndexes {
-				r := e.sstables[levelIndex+1][i]
+				r := e.tables[levelIndex+1][i]
 				if err := r.Remove(); err != nil {
 					return fmt.Errorf("lsm compaction: removing sstable file: %w", err)
 				}
 			}
-			e.sstables[levelIndex+1] = removeByIndexes(e.sstables[levelIndex+1], nextLevelSSTablesIndexes)
+			e.tables[levelIndex+1] = removeByIndexes(e.tables[levelIndex+1], nextLevelSSTablesIndexes)
 
 			// Добавляем новый sstable на след уровень
-			e.sstables[levelIndex+1] = append(e.sstables[levelIndex+1], sstableWrapper)
+			e.tables[levelIndex+1] = append(e.tables[levelIndex+1], sstableWrapper)
 
 			continue
 		}
@@ -543,7 +475,7 @@ func (e *Engine) initFromDirectory() error {
 			return fmt.Errorf("lsm initFromDirectory: reading sstable %s: %w", entry.Name(), err)
 		}
 
-		e.addSSTableToFirstLevel(sstableWrapper)
+		e.pushTable(sstableWrapper)
 	}
 
 	if err := e.compaction(); err != nil {
@@ -654,8 +586,8 @@ func (e *Engine) addToMemtable(key []byte, value []byte) error {
 	return nil
 }
 
-func (e *Engine) findCandidates(key []byte, levelIndex int) []*SSTableWrapper {
-	currentLevelTables := e.sstables[levelIndex]
+func (e *Engine) findKeyCandidates(key []byte, levelIndex int) []*SSTableWrapper {
+	currentLevelTables := e.tables[levelIndex]
 
 	if levelIndex == 0 {
 		return currentLevelTables
@@ -673,22 +605,34 @@ func (e *Engine) findCandidates(key []byte, levelIndex int) []*SSTableWrapper {
 	return make([]*SSTableWrapper, 0)
 }
 
-func (e *Engine) hasSSTables() bool {
-	return len(e.sstables) > 0
+func (e *Engine) hasTables() bool {
+	return len(e.tables) > 0
 }
 
 func (e *Engine) getNumberOfLevels() int {
-	return len(e.sstables)
+	return len(e.tables)
 }
 
-func (e *Engine) getSSTables(levelIndex int) []*SSTableWrapper {
-	return e.sstables[levelIndex]
+func (e *Engine) getTables(levelIndex int) []*SSTableWrapper {
+	return e.tables[levelIndex]
 }
 
-func (e *Engine) addSSTableToFirstLevel(sstableWrapper *SSTableWrapper) {
-	if len(e.sstables) == 0 {
-		e.sstables = [][]*SSTableWrapper{{sstableWrapper}}
+func (e *Engine) getTable(levelIndex int, tableIndex int) *SSTableWrapper {
+	return e.tables[levelIndex][tableIndex]
+}
+
+func (e *Engine) getMemtable() *skiplist.SkipList {
+	return e.memtable
+}
+
+func (e *Engine) getNumberOfTables(levelIndex int) int {
+	return len(e.tables[levelIndex])
+}
+
+func (e *Engine) pushTable(sstableWrapper *SSTableWrapper) {
+	if len(e.tables) == 0 {
+		e.tables = [][]*SSTableWrapper{{sstableWrapper}}
 	} else {
-		e.sstables[0] = append(e.sstables[0], sstableWrapper)
+		e.tables[0] = append(e.tables[0], sstableWrapper)
 	}
 }

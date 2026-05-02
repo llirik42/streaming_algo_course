@@ -2,11 +2,12 @@ package lsm
 
 import (
 	"bytes"
+	"os"
 	"sort"
 )
 
-func SortPairs(pairs []pair) {
-	by := func(p1, p2 *pair) bool {
+func sortPairs(pairs []iteratorPair) {
+	by := func(p1, p2 *iteratorPair) bool {
 		return bytes.Compare(p1.key, p2.key) <= 0
 	}
 
@@ -18,8 +19,8 @@ func SortPairs(pairs []pair) {
 }
 
 type pairSorter struct {
-	pairs []pair
-	by    func(p1, p2 *pair) bool
+	pairs []iteratorPair
+	by    func(p1, p2 *iteratorPair) bool
 }
 
 func (s *pairSorter) Len() int {
@@ -32,4 +33,23 @@ func (s *pairSorter) Swap(i, j int) {
 
 func (s *pairSorter) Less(i, j int) bool {
 	return s.by(&s.pairs[i], &s.pairs[j])
+}
+
+func directoryExists(path string) bool {
+	info, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return false
+	}
+	return info.IsDir()
+}
+
+func removeByIndexes(slice []*SSTableWrapper, indexes []int) []*SSTableWrapper {
+	sort.Sort(sort.Reverse(sort.IntSlice(indexes)))
+
+	for _, i := range indexes {
+		if i >= 0 && i < len(slice) {
+			slice = append(slice[:i], slice[i+1:]...)
+		}
+	}
+	return slice
 }
