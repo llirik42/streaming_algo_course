@@ -6,6 +6,8 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
+	"kvschool/internal/kv/lsmstore"
+	"log"
 	"math/rand"
 	"os"
 	"time"
@@ -103,6 +105,7 @@ func runLoad(args []string) error {
 	count := fs.Int("count", 10000, "количество операций")
 	zipf := fs.Float64("zipf", 0, "параметр s для Zipf (0 для равномерного, >1.0 для перекошенного)")
 	storeKind := fs.String("store", "memmap", "тип хранилища: memmap|skiplist|lsm")
+
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -150,6 +153,12 @@ func initStore(kind string) (kv.Store, error) {
 		return memmap.New(), nil
 	case "skiplist":
 		return memSkipListDefault(), nil
+	case "lsm":
+		store, err := lsmstore.Open(lsmstore.Options{Dir: "/home/llirik42/db"})
+		if err != nil {
+			log.Fatalf("open: %v", err)
+		}
+		return store, nil
 	// case "lsm": будет добавлен в процессе выполнения заданий
 	default:
 		return nil, fmt.Errorf("неизвестное хранилище %q", kind)

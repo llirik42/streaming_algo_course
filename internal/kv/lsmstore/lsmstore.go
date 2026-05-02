@@ -2,15 +2,11 @@ package lsmstore
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"kvschool/internal/iterator"
 	"kvschool/internal/kv"
 	"kvschool/internal/lsm"
 )
-
-// ErrNotImplemented используется в заготовке практики второго дня.
-var ErrNotImplemented = errors.New("lsmstore: функция не реализована")
 
 const (
 	MemtableFlushThreshold = 1024 * 1024

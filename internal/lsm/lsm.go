@@ -460,9 +460,9 @@ func Open(options Options) (*Engine, error) {
 		if err := tmpWalFile.Close(); err != nil {
 			return nil, fmt.Errorf("lsm Open: closing wal file %s: %w", walFilePath, err)
 		}
-		if err := os.Remove(tmpWALFilePath); err != nil {
-			return nil, fmt.Errorf("lsm Open: removing temporary WAL file %s: %w", walFilePath, err)
-		}
+		//if err := os.Remove(tmpWALFilePath); err != nil {
+		//	return nil, fmt.Errorf("lsm Open: removing temporary WAL file %s: %w", walFilePath, err)
+		//}
 	}
 
 	return engine, nil
@@ -681,7 +681,9 @@ func (e *Engine) flush() error {
 
 	newSSTableWriter := sstable.NewWriter(newSSTableFile)
 
+	count := 0
 	for {
+		count++
 		key, value, ok, err := memtableIterator.Next()
 		if err != nil {
 			return fmt.Errorf("lsm flush: iterate over memtable: %w", err)
@@ -689,11 +691,11 @@ func (e *Engine) flush() error {
 		if !ok {
 			break
 		}
-		// TODO: что делать с удалёнными записями?
 		if err := newSSTableWriter.Add(key, value); err != nil {
 			return fmt.Errorf("lsm flush: write memtable entry to disk: %w", err)
 		}
 	}
+
 	if err := newSSTableWriter.Close(); err != nil {
 		return fmt.Errorf("lsm flush: closing sstable writer: %w", err)
 	}
@@ -702,12 +704,19 @@ func (e *Engine) flush() error {
 	e.memTableSize = 0
 
 	// Очистка WAL
-	if err := e.walWriter.Close(); err != nil {
-		return fmt.Errorf("lsm flush: closing wal file: %w", err)
+	//if err := e.walWriter.Close(); err != nil {
+	//	return fmt.Errorf("lsm flush: closing wal file: %w", err)
+	//}
+	//if err := e.walFile.Close(); err != nil {
+	//	return fmt.Errorf("lsm flush: closing wal file: %w", err)
+	//}
+
+	walPath := path.Join(e.options.Dir, "wal")
+
+	if err := os.Rename(path.Join(walPath), fmt.Sprintf("%s%d.deleted", walPath, time.Now().UnixNano())); err != nil {
+		return fmt.Errorf("lsm flush: rename wal file %s: %w", walPath, err)
 	}
-	if err := e.walFile.Close(); err != nil {
-		return fmt.Errorf("lsm flush: closing wal file: %w", err)
-	}
+
 	walFile, err := os.Create(path.Join(e.options.Dir, "wal"))
 	if err != nil {
 		return fmt.Errorf("lsm flush: creating wal file: %w", err)
@@ -895,9 +904,13 @@ func (e *Engine) compaction() error {
 				if err := r.file.Close(); err != nil {
 					return fmt.Errorf("lsm compaction: closing sstable file: %w", err)
 				}
-				if err := os.Remove(r.file.Name()); err != nil {
+				if err := os.Rename(r.file.Name(), fmt.Sprintf("%s.deleted", r.file.Name())); err != nil {
 					return fmt.Errorf("lsm compaction: removing sstable file: %w", err)
 				}
+
+				//if err := os.Remove(r.file.Name()); err != nil {
+				//	return fmt.Errorf("lsm compaction: removing sstable file: %w", err)
+				//}
 			}
 			e.sstables[levelIndex] = e.sstables[levelIndex][:0]
 
@@ -907,9 +920,14 @@ func (e *Engine) compaction() error {
 				if err := r.file.Close(); err != nil {
 					return fmt.Errorf("lsm compaction: closing sstable file: %w", err)
 				}
-				if err := os.Remove(r.file.Name()); err != nil {
+
+				if err := os.Rename(r.file.Name(), fmt.Sprintf("%s.deleted", r.file.Name())); err != nil {
 					return fmt.Errorf("lsm compaction: removing sstable file: %w", err)
 				}
+
+				//if err := os.Remove(r.file.Name()); err != nil {
+				//	return fmt.Errorf("lsm compaction: removing sstable file: %w", err)
+				//}
 			}
 			e.sstables[levelIndex+1] = removeByIndexes(e.sstables[levelIndex+1], allNextLevelIndexes)
 
@@ -1020,9 +1038,13 @@ func (e *Engine) compaction() error {
 			if err := r.file.Close(); err != nil {
 				return fmt.Errorf("lsm compaction: closing sstable file: %w", err)
 			}
-			if err := os.Remove(r.file.Name()); err != nil {
+			if err := os.Rename(r.file.Name(), fmt.Sprintf("%s.deleted", r.file.Name())); err != nil {
 				return fmt.Errorf("lsm compaction: removing sstable file: %w", err)
 			}
+
+			//if err := os.Remove(r.file.Name()); err != nil {
+			//	return fmt.Errorf("lsm compaction: removing sstable file: %w", err)
+			//}
 			e.sstables[levelIndex] = append(e.sstables[levelIndex][:minIntersectionIndex], e.sstables[levelIndex][minIntersectionIndex+1:]...)
 
 			// Удаляем sstable следующего уровня
@@ -1032,9 +1054,14 @@ func (e *Engine) compaction() error {
 				if err := r.file.Close(); err != nil {
 					return fmt.Errorf("lsm compaction: closing sstable file: %w", err)
 				}
-				if err := os.Remove(r.file.Name()); err != nil {
+
+				if err := os.Rename(r.file.Name(), fmt.Sprintf("%s.deleted", r.file.Name())); err != nil {
 					return fmt.Errorf("lsm compaction: removing sstable file: %w", err)
 				}
+
+				//if err := os.Remove(r.file.Name()); err != nil {
+				//	return fmt.Errorf("lsm compaction: removing sstable file: %w", err)
+				//}
 			}
 			e.sstables[levelIndex+1] = removeByIndexes(e.sstables[levelIndex+1], nextLevelSSTablesIndexes)
 

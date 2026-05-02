@@ -5,6 +5,7 @@ package lsmstore
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	. "kvschool/internal/helpers"
@@ -15,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 type testData struct {
@@ -677,7 +679,6 @@ func TestLSMStore_MultipleKeysLarge(t *testing.T) {
 		deleteSuccess(data, s2, key)
 	}
 	for i := start; i <= end; i++ {
-		fmt.Printf("%d/%d\n", i, end)
 		key := StringToBytes(fmt.Sprintf("key%d", i))
 		getNotFound(data, s2, key)
 	}
@@ -863,4 +864,223 @@ func TestLSMStore_MultipleKeysLargeRandom(t *testing.T) {
 	closeIteratorSuccess(data, it3)
 	it3 = nil
 	s2 = nil
+}
+
+func BenchmarkLargeAllUnique(b *testing.B) {
+	ctx := context.Background()
+
+	dir := "/home/llirik42/all-unique"
+	if err := os.RemoveAll(dir); err != nil {
+		b.Fatal(err)
+	}
+
+	store, err := Open(Options{Dir: dir})
+	if err != nil {
+		b.Fatalf("open: %v", err)
+	}
+
+	N := 4
+
+	b.Logf("start: %d", time.Now().UnixNano())
+	for n := 0; n < N; n++ {
+		byteN := byte(n)
+
+		for i := 0; i < 256; i++ {
+			byteI := byte(i)
+
+			b.Logf("%d-%d-%d", n, i, time.Now().UnixNano())
+			for j := 0; j < 256; j++ {
+				byteJ := byte(j)
+
+				for k := 0; k < 256; k++ {
+					byteK := byte(k)
+
+					key := []byte{byteN, byteI, byteJ, byteK}
+					value := []byte{byteN, byteI, byteJ, byteK}
+					if err := store.Put(ctx, key, value); err != nil {
+						b.Fatalf("put: %v", err)
+					}
+				}
+			}
+		}
+	}
+}
+
+func BenchmarkLarge256Unique(b *testing.B) {
+	ctx := context.Background()
+
+	dir := "/home/llirik42/256-unique"
+	if err := os.RemoveAll(dir); err != nil {
+		b.Fatal(err)
+	}
+
+	store, err := Open(Options{Dir: dir})
+	if err != nil {
+		b.Fatalf("open: %v", err)
+	}
+
+	N := 4
+
+	for n := 0; n < N; n++ {
+		byteN := byte(n)
+
+		for i := 0; i < 256; i++ {
+			byteI := byte(i)
+
+			b.Logf("start: %d", time.Now().UnixNano())
+
+			for j := 0; j < 256; j++ {
+				byteJ := byte(j)
+
+				for k := 0; k < 256; k++ {
+					byteK := byte(k)
+
+					key := []byte{byteK}
+					value := []byte{byteN, byteI, byteJ, byteK}
+					if err := store.Put(ctx, key, value); err != nil {
+						b.Fatalf("put: %v", err)
+					}
+				}
+			}
+
+			b.Logf("%d-%d-%d", n, i, time.Now().UnixNano())
+		}
+	}
+}
+
+func BenchmarkCDR(b *testing.B) {
+	type Record struct {
+		Timestamp string
+		Imsi      string
+		Msisdn    string
+		CallTyp   string
+		Duration  uint16
+		CellId    string
+		Lat       float32
+		Lon       float32
+	}
+
+	ctx := context.Background()
+
+	dir := "/home/llirik42/cdr"
+	if err := os.RemoveAll(dir); err != nil {
+		b.Fatal(err)
+	}
+
+	store, err := Open(Options{Dir: dir})
+	if err != nil {
+		b.Fatalf("open: %v", err)
+	}
+
+	cdrFilePath := "/home/llirik42/cdr.json"
+	cdrFileContent, err := os.ReadFile(cdrFilePath)
+	if err != nil {
+		b.Fatalf("read: %v", err)
+	}
+
+	var records []Record
+	if err := json.Unmarshal(cdrFileContent, &records); err != nil {
+		b.Fatalf("unmarshal: %v", err)
+	}
+
+	N := 5000
+
+	b.Logf("Start: %d", time.Now().UnixNano())
+
+	for i := 0; i < N; i++ {
+		for j := 0; j < 1000; j++ {
+			r := records[1000*i+j]
+			key := StringToBytes(fmt.Sprintf("%s,%s", r.Imsi, r.Timestamp))
+			value := StringToBytes(fmt.Sprintf("%s,%s,%d,%s,%f,%f", r.Msisdn, r.CallTyp, r.Duration, r.CellId, r.Lat, r.Lon))
+			if err := store.Put(ctx, key, value); err != nil {
+				b.Fatalf("put: %v", err)
+			}
+		}
+
+		b.Logf("Iteration %d/%d, %d", i+1, N, time.Now().UnixNano())
+	}
+}
+
+func BenchmarkPutN(b *testing.B) {
+	ctx := context.Background()
+
+	for i := 1; i <= 20; i++ {
+		size := i * 5000
+		b.Logf("size=%d\n", size)
+
+		keys := make([][]byte, size)
+		values := make([][]byte, size)
+
+		for j := 0; j < size; j++ {
+			keys[j] = StringToBytes(fmt.Sprintf("key-%d", j))
+			values[j] = StringToBytes(fmt.Sprintf("value-%d", j))
+		}
+
+		// запуск несколько раз для более стабильного результата
+		for j := 0; j < 5; j++ {
+			dir := fmt.Sprintf("/home/llirik42/bench-%d-%d", i, j)
+
+			store, err := Open(Options{Dir: dir})
+			if err != nil {
+				b.Fatalf("open: %v", err)
+			}
+
+			b.Logf("Start: %d-%d-%d\n", i, j, time.Now().UnixNano())
+
+			for k := 0; k < size; k++ {
+				key := keys[k]
+				if err := store.Put(ctx, key, values[k]); err != nil {
+					b.Fatalf("ошибка put: %v", err)
+				}
+			}
+
+			b.Logf("Finish: %d-%d-%d\n", i, j, time.Now().UnixNano())
+		}
+	}
+}
+
+func BenchmarkPutGetN(b *testing.B) {
+	ctx := context.Background()
+
+	for i := 1; i <= 20; i++ {
+		size := i * 4000
+		b.Logf("size=%d\n", size)
+
+		keys := make([][]byte, size)
+		values := make([][]byte, size)
+
+		for j := 0; j < size; j++ {
+			keys[j] = StringToBytes(fmt.Sprintf("key-%d", j))
+			values[j] = StringToBytes(fmt.Sprintf("value-%d", j))
+		}
+
+		// запуск несколько раз для более стабильного результата
+		for j := 0; j < 5; j++ {
+			dir := fmt.Sprintf("/home/llirik42/bench-%d-%d", i, j)
+
+			store, err := Open(Options{Dir: dir})
+			if err != nil {
+				b.Fatalf("open: %v", err)
+			}
+
+			b.Logf("Start: %d-%d-%d\n", i, j, time.Now().UnixNano())
+
+			for k := 0; k < size; k++ {
+				key := keys[k]
+
+				if k%100 == 0 {
+					if err := store.Put(ctx, key, values[k]); err != nil {
+						b.Fatalf("ошибка put: %v", err)
+					}
+				} else {
+					_, err := store.Get(ctx, key)
+					if err != nil && !errors.Is(err, lsm.ErrNotFound) {
+						b.Fatalf("ошибка get: %v", err)
+					}
+				}
+			}
+
+			b.Logf("Finish: %d-%d-%d\n", i, j, time.Now().UnixNano())
+		}
+	}
 }

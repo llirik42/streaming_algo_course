@@ -15,3 +15,5 @@ test-day3:
 demo-wordcount:
 	go run ./cmd/kvtool wordcount -in ./testdata/text_small.txt
 
+lsm-kv:
+	go run ./cmd/kvtool load -count 1000 -store lsm
