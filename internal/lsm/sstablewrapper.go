@@ -17,7 +17,7 @@ type SSTableWrapper struct {
 	creationTime time.Time
 }
 
-func createSSTable(directory string, recordsSource iterator.Iterator) (*SSTableWrapper, error) {
+func CreateSSTable(directory string, recordsSource iterator.Iterator) (*SSTableWrapper, error) {
 	now := time.Now()
 	nowUnixNano := now.UnixNano()
 
@@ -26,7 +26,7 @@ func createSSTable(directory string, recordsSource iterator.Iterator) (*SSTableW
 	filePath := path.Join(directory, fileName)
 	file, err := os.Create(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("lsm createSSTable: creating file %s: %w", filePath, err)
+		return nil, fmt.Errorf("lsm CreateSSTable: creating file %s: %w", filePath, err)
 	}
 
 	// Writing records
@@ -34,27 +34,27 @@ func createSSTable(directory string, recordsSource iterator.Iterator) (*SSTableW
 	for {
 		key, value, ok, err := recordsSource.Next()
 		if err != nil {
-			return nil, fmt.Errorf("lsm createSSTable: Next() of records source: %w", err)
+			return nil, fmt.Errorf("lsm CreateSSTable: Next() of records source: %w", err)
 		}
 		if !ok {
 			break
 		}
 		if err := writer.Add(key, value); err != nil {
-			return nil, fmt.Errorf("lsm createSSTable: writing records to %s: %w", filePath, err)
+			return nil, fmt.Errorf("lsm CreateSSTable: writing records to %s: %w", filePath, err)
 		}
 	}
 	if err := writer.Close(); err != nil {
-		return nil, fmt.Errorf("lsm createSSTable: closing writer on %s: %w", filePath, err)
+		return nil, fmt.Errorf("lsm CreateSSTable: closing writer on %s: %w", filePath, err)
 	}
 
 	// Creating wrapper
 	stat, err := file.Stat()
 	if err != nil {
-		return nil, fmt.Errorf("lsm createSSTable: stat %s: %w", filePath, err)
+		return nil, fmt.Errorf("lsm CreateSSTable: stat %s: %w", filePath, err)
 	}
 	reader, err := sstable.NewReader(file, stat.Size())
 	if err != nil {
-		return nil, fmt.Errorf("lsm createSSTable: creating reader on %s: %w", filePath, err)
+		return nil, fmt.Errorf("lsm CreateSSTable: creating reader on %s: %w", filePath, err)
 	}
 
 	return &SSTableWrapper{
@@ -64,32 +64,32 @@ func createSSTable(directory string, recordsSource iterator.Iterator) (*SSTableW
 	}, nil
 }
 
-func readSSTable(name, directory string) (*SSTableWrapper, error) {
+func ReadSSTable(name, directory string) (*SSTableWrapper, error) {
 	filePath := path.Join(directory, name)
 
 	// Opening file
 	file, err := os.Open(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("lsm readSSTable: opening file %s: %w", filePath, err)
+		return nil, fmt.Errorf("lsm ReadSSTable: opening file %s: %w", filePath, err)
 	}
 
 	// Reading file
 	stat, err := file.Stat()
 	if err != nil {
-		return nil, fmt.Errorf("lsm readSSTable: stat %s: %w", filePath, err)
+		return nil, fmt.Errorf("lsm ReadSSTable: stat %s: %w", filePath, err)
 	}
 	reader, err := sstable.NewReader(file, stat.Size())
 	if err != nil {
-		return nil, fmt.Errorf("lsm readSSTable: reading file %s: %w", filePath, err)
+		return nil, fmt.Errorf("lsm ReadSSTable: reading file %s: %w", filePath, err)
 	}
 	if err := reader.ValidateChecksum(); err != nil {
-		return nil, fmt.Errorf("lsm readSSTable: validating file %s: %w", filePath, err)
+		return nil, fmt.Errorf("lsm ReadSSTable: validating file %s: %w", filePath, err)
 	}
 
 	// Parsing creation time
 	creationTimeUnixNano, err := strconv.ParseInt(name, 10, 64)
 	if err != nil {
-		return nil, fmt.Errorf("lsm readSSTable: invalid file name %s: %w", filePath, err)
+		return nil, fmt.Errorf("lsm ReadSSTable: invalid file name %s: %w", filePath, err)
 	}
 
 	return &SSTableWrapper{
@@ -99,7 +99,7 @@ func readSSTable(name, directory string) (*SSTableWrapper, error) {
 	}, nil
 }
 
-func doIntersect(w1 *SSTableWrapper, w2 *SSTableWrapper) bool {
+func DoIntersect(w1 *SSTableWrapper, w2 *SSTableWrapper) bool {
 	r1 := w1.reader
 	r2 := w2.reader
 
@@ -108,17 +108,17 @@ func doIntersect(w1 *SSTableWrapper, w2 *SSTableWrapper) bool {
 	return cond1 && cond2
 }
 
-func (w *SSTableWrapper) getReader() *sstable.Reader {
+func (w *SSTableWrapper) GetReader() *sstable.Reader {
 	return w.reader
 }
 
-func (w *SSTableWrapper) getCreationTime() time.Time {
+func (w *SSTableWrapper) GetCreationTime() time.Time {
 	return w.creationTime
 }
 
 func (w *SSTableWrapper) Close() error {
 	if err := w.file.Close(); err != nil {
-		return fmt.Errorf("lsm SSTableWrapper.Close(): closing file: %w", err)
+		return fmt.Errorf("lsm SSTableWrapper.close(): closing file: %w", err)
 	}
 
 	return nil
@@ -134,4 +134,12 @@ func (w *SSTableWrapper) Remove() error {
 	}
 
 	return nil
+}
+
+func ProbablyContains(key []byte, wrapper *SSTableWrapper) bool {
+	if bytes.Compare(wrapper.reader.GetFirstKey(), key) <= 0 && bytes.Compare(key, wrapper.reader.GetLastKey()) <= 0 {
+		return true
+	}
+
+	return false
 }
