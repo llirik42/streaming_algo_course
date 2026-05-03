@@ -198,6 +198,8 @@ func (e *Engine) Scan(start []byte, end []byte) (iterator.Iterator, error) {
 	return &Iterator{
 		topLevelSource:     topLevelSource,
 		bottomLevelSources: bottomLevelSources,
+		returnAugmented:    false,
+		returnTombstones:   false,
 	}, nil
 }
 
@@ -260,6 +262,8 @@ func (e *Engine) flushIfNeeded() error {
 
 func (e *Engine) compaction() error {
 	for levelIndex := 0; levelIndex < e.getNumberOfLevels(); levelIndex++ {
+		isLevelLast := levelIndex == e.getNumberOfLevels()-1
+		isNextLevelLast := levelIndex == e.getNumberOfLevels()-2
 		levelNumber := levelIndex + 1
 		maxSSTablesNumber := int(math.Pow(e.levelBase, float64(levelNumber)))
 
@@ -268,11 +272,11 @@ func (e *Engine) compaction() error {
 			continue
 		}
 
-		if levelIndex == len(e.tables)-1 {
+		if isLevelLast {
 			// Текущий уровень последний
 			// Тогда просто перемещаем первый sstable из текущего уровня на следующий
 			firstTable := e.tables[levelIndex][0]
-			e.tables[levelIndex] = e.tables[levelIndex][1:] // TODO: оптимизировать!
+			e.tables[levelIndex] = e.tables[levelIndex][1:]
 			e.tables = append(e.tables, []*sstableWrapper{firstTable})
 			break
 		}
@@ -290,6 +294,8 @@ func (e *Engine) compaction() error {
 				intersectionTable[curLevelIndex] = append(intersectionTable[curLevelIndex], nextLevelIndex)
 			}
 		}
+
+		returnTombstones := !isNextLevelLast
 
 		if levelIndex == 0 {
 			// Рассматриваем все таблицы текущего (нулевого) уровня, так как они могут пересекаться по ключам
@@ -325,13 +331,15 @@ func (e *Engine) compaction() error {
 				}
 				bottomLevelSources[1][i] = ps
 			}
+
 			it := &Iterator{
 				bottomLevelSources: bottomLevelSources,
-				trackTombstones:    true,
+				returnTombstones:   returnTombstones,
+				returnAugmented:    true,
 			}
 
 			// Создаём новую таблицу
-			sstableWrapper, err := createSSTable(e.directory, it)
+			newTable, err := createSSTable(e.directory, it)
 			if err != nil {
 				return fmt.Errorf("lsm compaction: creating sstable: %w", err)
 			}
@@ -353,8 +361,14 @@ func (e *Engine) compaction() error {
 			}
 			e.tables[levelIndex+1] = removeByIndexes(e.tables[levelIndex+1], allNextLevelIndexes)
 
-			// Добавляем новую таблицу на следующий уровень
-			e.tables[levelIndex+1] = append(e.tables[levelIndex+1], sstableWrapper)
+			if newTable.getReader().HasRecords() {
+				// Добавляем новую таблицу на следующий уровень
+				e.tables[levelIndex+1] = append(e.tables[levelIndex+1], newTable)
+			} else {
+				if err := newTable.remove(); err != nil {
+					return fmt.Errorf("lsm compaction: removing empty sstable file: %w", err)
+				}
+			}
 		} else {
 			// Рассматриваем лишь одну таблицу текущего уровня (которая пересекается с наим числом таблиц следующего)
 
@@ -393,7 +407,8 @@ func (e *Engine) compaction() error {
 			}
 			it := &Iterator{
 				bottomLevelSources: bottomLevelSources,
-				trackTombstones:    true,
+				returnTombstones:   returnTombstones,
+				returnAugmented:    true,
 			}
 
 			// Создаём новую таблицу
@@ -418,8 +433,14 @@ func (e *Engine) compaction() error {
 			}
 			e.tables[levelIndex+1] = removeByIndexes(e.tables[levelIndex+1], nextLevelTablesIndexes)
 
-			// Добавляем новую таблицу на следующий уровень
-			e.tables[levelIndex+1] = append(e.tables[levelIndex+1], newTable)
+			if newTable.getReader().HasRecords() {
+				// Добавляем новую таблицу на следующий уровень
+				e.tables[levelIndex+1] = append(e.tables[levelIndex+1], newTable)
+			} else {
+				if err := newTable.remove(); err != nil {
+					return fmt.Errorf("lsm compaction: removing empty sstable file: %w", err)
+				}
+			}
 		}
 	}
 

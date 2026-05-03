@@ -120,7 +120,8 @@ type Iterator struct {
 	bottomLevelSources [][]*pairSource
 	pairs              []iteratorPair
 	isEmpty            bool
-	trackTombstones    bool
+	returnTombstones   bool
+	returnAugmented    bool
 }
 
 func (it *Iterator) Next() (key []byte, value []byte, ok bool, err error) {
@@ -161,18 +162,23 @@ func (it *Iterator) Next() (key []byte, value []byte, ok bool, err error) {
 		it.pairs = it.pairs[1:]
 		firstPair.source.allowMoving()
 
-		if it.trackTombstones {
-			return firstPair.key, firstPair.value, true, nil
+		key := firstPair.key
+		augmentedValue := firstPair.value
+
+		if it.returnTombstones {
+			return key, augmentedValue, true, nil
 		}
 
-		augmentedValue := firstPair.value
 		value, isTombstone := parseAugmentedValue(augmentedValue)
-
 		if isTombstone {
 			continue
 		}
 
-		return firstPair.key, value, true, nil
+		if it.returnAugmented {
+			return key, augmentedValue, true, nil
+		}
+
+		return key, value, true, nil
 	}
 
 	return nil, nil, false, nil
