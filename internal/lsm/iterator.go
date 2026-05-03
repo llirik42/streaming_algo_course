@@ -22,6 +22,18 @@ type pairSource struct {
 	info pairSourceInfo
 }
 
+func (ps *pairSource) canMove() bool {
+	return ps.info.isAllowedToMove
+}
+
+func (ps *pairSource) allowMoving() {
+	ps.info.isAllowedToMove = true
+}
+
+func (ps *pairSource) disallowMoving() {
+	ps.info.isAllowedToMove = false
+}
+
 func createSSTablePairSource(e *Engine, levelIndex, tableIndex int, start, end []byte) (*pairSource, error) {
 	table := e.getTable(levelIndex, tableIndex)
 
@@ -147,7 +159,7 @@ func (it *Iterator) Next() (key []byte, value []byte, ok bool, err error) {
 
 		firstPair := it.pairs[0]
 		it.pairs = it.pairs[1:]
-		firstPair.source.info.isAllowedToMove = true
+		firstPair.source.allowMoving()
 
 		if it.trackTombstones {
 			return firstPair.key, firstPair.value, true, nil
@@ -183,7 +195,7 @@ func (it *Iterator) Close() error {
 }
 
 func (it *Iterator) processSource(source *pairSource) (bool, error) {
-	if source == nil || !source.info.isAllowedToMove {
+	if source == nil || !source.canMove() {
 		return false, nil
 	}
 
@@ -193,7 +205,7 @@ func (it *Iterator) processSource(source *pairSource) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("lsm Iterator.processSource(): getting new pair: %w", err)
 	}
-	source.info.isAllowedToMove = false
+	source.disallowMoving()
 
 	if ok {
 		found := false
@@ -206,7 +218,7 @@ func (it *Iterator) processSource(source *pairSource) (bool, error) {
 				if comparePairSources(source, previousSource) > 0 {
 					it.updatePairs(pairIndex, value, source)
 				} else {
-					source.info.isAllowedToMove = true
+					source.allowMoving()
 				}
 			}
 		}
@@ -220,7 +232,7 @@ func (it *Iterator) processSource(source *pairSource) (bool, error) {
 }
 
 func (it *Iterator) updatePairs(pairIndex int, newValue []byte, newSource *pairSource) {
-	it.pairs[pairIndex].source.info.isAllowedToMove = true
+	it.pairs[pairIndex].source.allowMoving()
 	it.pairs[pairIndex].value = newValue
 	it.pairs[pairIndex].source = newSource
 }

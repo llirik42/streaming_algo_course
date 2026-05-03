@@ -2,7 +2,6 @@ package lsm
 
 import (
 	"bytes"
-	"os"
 	"sort"
 )
 
@@ -33,14 +32,6 @@ func (s *pairSorter) Swap(i, j int) {
 
 func (s *pairSorter) Less(i, j int) bool {
 	return s.by(&s.pairs[i], &s.pairs[j])
-}
-
-func directoryExists(path string) bool {
-	info, err := os.Stat(path)
-	if os.IsNotExist(err) {
-		return false
-	}
-	return info.IsDir()
 }
 
 func removeByIndexes(slice []*SSTableWrapper, indexes []int) []*SSTableWrapper {
