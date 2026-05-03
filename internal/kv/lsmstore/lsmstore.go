@@ -18,8 +18,8 @@ type Options struct {
 func Open(options Options) (*Store, error) {
 	engineOptions := lsm.Options{
 		Dir:                    options.Dir,
-		MemtableFlushThreshold: 0,
-		LevelBase:              2,
+		MemtableFlushThreshold: 1024 * 1024,
+		LevelBase:              10,
 		Seed:                   42,
 	}
 
