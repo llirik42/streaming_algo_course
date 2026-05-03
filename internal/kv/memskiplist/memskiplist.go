@@ -2,6 +2,7 @@ package memskiplist
 
 import (
 	"context"
+	"kvschool/internal/iterator"
 
 	"kvschool/internal/kv"
 	"kvschool/internal/skiplist"
@@ -50,7 +51,7 @@ func (s *Store) Scan(_ context.Context, start, end []byte) (kv.Iterator, error) 
 
 func (s *Store) Close() error { return nil }
 
-type iter struct{ it skiplist.Iterator }
+type iter struct{ it iterator.Iterator }
 
 func (i *iter) Next() (kv.Pair, bool, error) {
 	k, v, ok, err := i.it.Next()

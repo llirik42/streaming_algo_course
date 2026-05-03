@@ -7,7 +7,7 @@ test-day1:
 	go test -tags=day1 ./... -count=1
 
 test-day2:
-	go test -tags=day2 ./...
+	go test -tags=day2 ./... -count=1
 
 test-day3:
 	go test -tags=day3 ./...
@@ -15,3 +15,5 @@ test-day3:
 demo-wordcount:
 	go run ./cmd/kvtool wordcount -in ./testdata/text_small.txt
 
+lsm-kv:
+	go run ./cmd/kvtool load -count 10000 -store lsm

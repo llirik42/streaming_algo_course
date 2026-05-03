@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"kvschool/internal/coinflipper"
+	"kvschool/internal/helpers"
+	"kvschool/internal/iterator"
 )
 
 // ErrNotFound означает отсутствие ключа (IMSI).
@@ -24,12 +26,17 @@ type SkipList struct {
 // New создаёт SkipList. seed требуется для детерминируемых тестов (воспроизводимость поведения при ошибках).
 func New(seed int64) *SkipList {
 	defaultProbability := 0.5
-	head := Node{key: []byte{}, next: []*Node{nil}}
 
-	return &SkipList{
-		head:        &head,
+	s := &SkipList{
 		coinFlipper: coinflipper.New(seed, defaultProbability),
 	}
+	s.resetHead()
+
+	return s
+}
+
+func (s *SkipList) Clear() {
+	s.resetHead()
 }
 
 func (s *SkipList) SetProbability(probability float64) error {
@@ -46,28 +53,24 @@ func (s *SkipList) IsEmpty() bool {
 	return s.head.next[0] == nil
 }
 
-func (s *SkipList) GetLevelsNumber() int {
-	return len(s.head.next)
-}
-
 func (s *SkipList) Put(key, value []byte) error {
 	predecessors := s.findPredecessors(key)
 	zeroLevel := 0
 	zeroLevelPredecessor := predecessors[zeroLevel]
 	zeroLevelPredecessorSuccessor := zeroLevelPredecessor.next[zeroLevel]
 
-	if zeroLevelPredecessorSuccessor != nil && keysEqual(zeroLevelPredecessorSuccessor.key, key) {
+	if zeroLevelPredecessorSuccessor != nil && helpers.KeysEqual(zeroLevelPredecessorSuccessor.key, key) {
 		zeroLevelPredecessorSuccessor.value = value
 		return nil
 	}
 
 	newNode := &Node{
-		key:   cloneBytes(key),
-		value: cloneBytes(value),
+		key:   helpers.CloneBytes(key),
+		value: helpers.CloneBytes(value),
 		next:  make([]*Node, 0, 1), // Allocate for the 0th level
 	}
 	insertAfter(zeroLevelPredecessor, newNode, zeroLevel)
-	levelsNumber := s.GetLevelsNumber()
+	levelsNumber := s.getLevelsNumber()
 
 	for level := 1; ; level++ {
 		if !s.coinFlipper.Flip() {
@@ -90,8 +93,8 @@ func (s *SkipList) Get(key []byte) ([]byte, error) {
 	zeroLevelPredecessor := predecessors[0]
 	zeroLevelPredecessorSuccessor := zeroLevelPredecessor.next[zeroLevel]
 
-	if zeroLevelPredecessorSuccessor != nil && keysEqual(zeroLevelPredecessorSuccessor.key, key) {
-		return cloneBytes(zeroLevelPredecessorSuccessor.value), nil
+	if zeroLevelPredecessorSuccessor != nil && helpers.KeysEqual(zeroLevelPredecessorSuccessor.key, key) {
+		return helpers.CloneBytes(zeroLevelPredecessorSuccessor.value), nil
 	}
 
 	return nil, ErrNotFound
@@ -103,16 +106,16 @@ func (s *SkipList) Delete(key []byte) error {
 	zeroLevelPredecessor := predecessors[zeroLevel]
 	zeroLevelPredecessorSuccessor := zeroLevelPredecessor.next[zeroLevel]
 
-	if zeroLevelPredecessorSuccessor == nil || !keysEqual(zeroLevelPredecessorSuccessor.key, key) {
+	if zeroLevelPredecessorSuccessor == nil || !helpers.KeysEqual(zeroLevelPredecessorSuccessor.key, key) {
 		return ErrNotFound
 	}
 
 	node := zeroLevelPredecessorSuccessor
-	for level := s.GetLevelsNumber() - 1; level >= 0; level-- {
+	for level := s.getLevelsNumber() - 1; level >= 0; level-- {
 		levelPredecessor := predecessors[level]
 		levelPredecessorSuccessor := levelPredecessor.next[level]
 
-		if levelPredecessorSuccessor == nil || !keysEqual(levelPredecessorSuccessor.key, key) {
+		if levelPredecessorSuccessor == nil || !helpers.KeysEqual(levelPredecessorSuccessor.key, key) {
 			// The key is not present on the current level
 			continue
 		}
@@ -132,9 +135,9 @@ func (s *SkipList) Delete(key []byte) error {
 // Scan возвращает итератор по диапазону [start, end).
 // Если start == nil, считается -∞ (начало списка).
 // Если end == nil, считается +∞ (конец списка).
-func (s *SkipList) Scan(start, end []byte) (Iterator, error) {
-	if start != nil && end != nil && keysCompare(start, end) >= 0 {
-		return &SkipListIterator{current: nil, end: nil}, nil
+func (s *SkipList) Scan(start, end []byte) (iterator.Iterator, error) {
+	if start != nil && end != nil && helpers.CompareKeys(start, end) >= 0 {
+		return &Iterator{current: nil, end: nil}, nil
 	}
 
 	zeroLevel := 0
@@ -159,7 +162,7 @@ func (s *SkipList) Scan(start, end []byte) (Iterator, error) {
 		endNode = zeroLevelEndPredecessorSuccessor
 	}
 
-	return &SkipListIterator{current: startNode, end: endNode}, nil
+	return &Iterator{current: startNode, end: endNode}, nil
 }
 
 func (s *SkipList) GetRepresentation() string {
@@ -167,7 +170,7 @@ func (s *SkipList) GetRepresentation() string {
 		return "Empty SkipList"
 	}
 
-	levelsNumber := s.GetLevelsNumber()
+	levelsNumber := s.getLevelsNumber()
 	representation := fmt.Sprintf("%d levels\n", levelsNumber)
 
 	for level := 0; level < levelsNumber; level++ {
@@ -186,6 +189,10 @@ func (s *SkipList) GetRepresentation() string {
 	return representation
 }
 
+func (s *SkipList) getLevelsNumber() int {
+	return len(s.head.next)
+}
+
 func (s *SkipList) removeHighestLevel() {
 	head := s.head
 	head.next = head.next[:len(head.next)-1]
@@ -198,7 +205,7 @@ func (s *SkipList) createLevel(firstNode *Node) {
 }
 
 func (s *SkipList) findPredecessors(key []byte) []*Node {
-	levelsNumber := s.GetLevelsNumber()
+	levelsNumber := s.getLevelsNumber()
 	result := make([]*Node, levelsNumber)
 
 	currentNode := s.head
@@ -211,7 +218,7 @@ func (s *SkipList) findPredecessors(key []byte) []*Node {
 				break
 			}
 
-			if keysCompare(nextNode.key, key) >= 0 {
+			if helpers.CompareKeys(nextNode.key, key) >= 0 {
 				result[level] = currentNode
 				break
 			}
@@ -221,4 +228,8 @@ func (s *SkipList) findPredecessors(key []byte) []*Node {
 	}
 
 	return result
+}
+
+func (s *SkipList) resetHead() {
+	s.head = &Node{next: []*Node{nil}}
 }

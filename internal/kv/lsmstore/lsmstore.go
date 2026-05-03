@@ -2,34 +2,60 @@ package lsmstore
 
 import (
 	"context"
-	"errors"
-
+	"fmt"
 	"kvschool/internal/kv"
+	"kvschool/internal/lsm"
 )
 
-// ErrNotImplemented используется в заготовке практики второго дня.
-var ErrNotImplemented = errors.New("lsmstore: функция не реализована")
-
-// Store — KV поверх LSM.
-// В практической реализации вам нужно использовать пакеты internal/lsm, internal/sstable, internal/wal.
-type Store struct{}
+type Store struct {
+	engine *lsm.Engine
+}
 
 type Options struct {
 	Dir string
 }
 
-func Open(_ Options) (*Store, error) { return nil, ErrNotImplemented }
+func Open(options Options) (*Store, error) {
+	engineOptions := lsm.Options{
+		Dir:                    options.Dir,
+		MemtableFlushThreshold: 1024 * 1024,
+		LevelBase:              10,
+		Seed:                   42,
+	}
 
-func (s *Store) Put(_ context.Context, _ []byte, _ []byte) error { return ErrNotImplemented }
+	engine, err := lsm.Open(engineOptions)
+	if err != nil {
+		return nil, fmt.Errorf("lsmstore Open: creating LSM engine: %w", err)
+	}
 
-func (s *Store) Get(_ context.Context, _ []byte) ([]byte, error) { return nil, ErrNotImplemented }
+	store := &Store{
+		engine: engine,
+	}
 
-func (s *Store) Delete(_ context.Context, _ []byte) error { return ErrNotImplemented }
-
-func (s *Store) Scan(_ context.Context, _ []byte, _ []byte) (kv.Iterator, error) {
-	return nil, ErrNotImplemented
+	return store, nil
 }
 
-func (s *Store) Close() error { return ErrNotImplemented }
+func (s *Store) Put(_ context.Context, key []byte, value []byte) error {
+	return s.engine.Put(key, value)
+}
 
-var _ kv.Store = (*Store)(nil)
+func (s *Store) Get(_ context.Context, key []byte) ([]byte, error) {
+	return s.engine.Get(key)
+}
+
+func (s *Store) Delete(_ context.Context, key []byte) error {
+	return s.engine.Delete(key)
+}
+
+func (s *Store) Scan(_ context.Context, start []byte, end []byte) (kv.Iterator, error) {
+	lsmIterator, err := s.engine.Scan(start, end)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Iterator{lsmIterator: lsmIterator}, nil
+}
+
+func (s *Store) Close() error {
+	return s.engine.Close()
+}

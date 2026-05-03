@@ -1,5 +1,8 @@
+#!/usr/bin/python3
+
 import random
 from datetime import datetime, timedelta
+import json
 
 START_TIME = datetime(2026, 1, 1, 10, 0, 0)
 OPERATORS = {
@@ -22,7 +25,7 @@ def generate_phone(operator):
 def generate_imsi():
     return f"250{random.randint(10, 99)}00000{random.randint(10000, 99999)}"
 
-POPULATION_SIZE = 1000
+POPULATION_SIZE = 100000
 population = []
 for _ in range(POPULATION_SIZE):
     op = random.choice(list(OPERATORS.keys()))
@@ -31,8 +34,8 @@ for _ in range(POPULATION_SIZE):
         "msisdn": generate_phone(op)
     })
 
-print("timestamp,imsi,msisdn,call_type,duration_sec,cell_id,tower_lat,tower_lon")
-for i in range(100000):
+cdr_list = []
+for i in range(10000000):
     timestamp = (START_TIME + timedelta(seconds=i/10 + random.randint(0, 60))).strftime("%Y-%m-%dT%H:%M:%SZ")
     subscriber = random.choice(population)
     call_type = random.choice(CALL_TYPES)
@@ -43,5 +46,17 @@ for i in range(100000):
     cell_id = random.choice(CELL_IDS)
     lat = round(BASE_LAT + random.uniform(-0.01, 0.01), 4)
     lon = round(BASE_LON + random.uniform(-0.01, 0.01), 4)
-    
-    print(f"{timestamp},{subscriber['imsi']},{subscriber['msisdn']},{call_type},{duration},{cell_id},{lat},{lon}")
+
+    cdr_list.append({
+        "timestamp": timestamp,
+        "imsi": subscriber['imsi'],
+        "msisdn": subscriber['msisdn'],
+        "callTyp": call_type,
+        "duration": duration,
+        "cellId": cell_id,
+        "lat": lat,
+        "lon": lon
+    })
+
+with open("cdr_1000000.json", "w") as f:
+    json.dump(cdr_list, f)

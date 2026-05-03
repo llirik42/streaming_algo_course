@@ -1,35 +1,38 @@
 package skiplist
 
-// Iterator — упорядоченная итерация по диапазону ключей (Range Scan).
-// В HLR используется для выгрузки абонентов по префиксу IMSI.
-type Iterator interface {
-	Next() (key, value []byte, ok bool, err error)
-	Close() error
-}
+import "kvschool/internal/helpers"
 
-type SkipListIterator struct {
+type Iterator struct {
 	current *Node
 	end     *Node
 }
 
-func (s *SkipListIterator) Next() (key, value []byte, ok bool, err error) {
-	if s.current == nil {
+func (it *Iterator) Next() (key, value []byte, ok bool, err error) {
+	if !it.Has() {
 		return nil, nil, false, nil
 	}
 
-	if s.current == s.end {
-		return nil, nil, false, nil
-	}
-
-	node := s.current
+	node := it.current
 	zeroLevel := 0
-	s.current = s.current.next[zeroLevel]
+	it.current = it.current.next[zeroLevel]
 
-	return cloneBytes(node.key), cloneBytes(node.value), true, nil
+	return helpers.CloneBytes(node.key), helpers.CloneBytes(node.value), true, nil
 }
 
-func (s *SkipListIterator) Close() error {
-	s.current = nil
-	s.end = nil
+func (it *Iterator) Has() bool {
+	if it.current == nil {
+		return false
+	}
+
+	if it.current == it.end {
+		return false
+	}
+
+	return true
+}
+
+func (it *Iterator) Close() error {
+	it.current = nil
+	it.end = nil
 	return nil
 }
