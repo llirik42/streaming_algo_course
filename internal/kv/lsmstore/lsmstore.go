@@ -37,7 +37,14 @@ type Options struct {
 }
 
 func Open(options Options) (*Store, error) {
-	engine, err := lsm.Open(lsm.Options{Dir: options.Dir, MemtableFlushThreshold: MemtableFlushThreshold})
+	engineOptions := lsm.Options{
+		Dir:                    options.Dir,
+		MemtableFlushThreshold: 0,
+		LevelBase:              2,
+		Seed:                   42,
+	}
+
+	engine, err := lsm.Open(engineOptions)
 	if err != nil {
 		return nil, fmt.Errorf("lsmstore Open: creating LSM engine: %w", err)
 	}

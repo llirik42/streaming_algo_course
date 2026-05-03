@@ -15,13 +15,11 @@ import (
 
 var ErrNotFound = errors.New("lsm: ключ не найден")
 
-const (
-	T = 2
-)
-
 type Options struct {
 	Dir                    string
 	MemtableFlushThreshold int
+	LevelBase              int
+	Seed                   int
 }
 
 type Engine struct {
@@ -29,32 +27,29 @@ type Engine struct {
 	memtableSize           int
 	memtableFlushThreshold int
 
-	tables [][]*SSTableWrapper
-	wal    *WALWrapper
+	levelBase float64
+	tables    [][]*SSTableWrapper
+
+	wal *WALWrapper
 
 	directory string
 }
 
 func Open(options Options) (*Engine, error) {
-	// TODO: многие return nil, fmt.errorf() заменить на предупреждение
-
 	engine := &Engine{
-		memtable:               skiplist.New(42),
+		memtable:               skiplist.New(int64(options.Seed)),
 		tables:                 make([][]*SSTableWrapper, 0),
 		directory:              options.Dir,
 		memtableFlushThreshold: options.MemtableFlushThreshold,
+		levelBase:              float64(options.LevelBase),
 	}
 
-	directory := options.Dir
-
-	if !directoryExists(directory) {
-		if err := os.MkdirAll(directory, 0755); err != nil {
-			return nil, fmt.Errorf("lsm Open: making directory %s: %w", directory, err)
-		}
+	if err := makeDirectoryIfNotExists(engine.directory); err != nil {
+		return nil, fmt.Errorf("lsm Open: making directory %s: %w", engine.directory, err)
 	}
 
 	if err := engine.initFromDirectory(); err != nil {
-		return nil, fmt.Errorf("lsm Open: initializing from directory %s: %w", directory, err)
+		return nil, fmt.Errorf("lsm Open: initializing from directory %s: %w", engine.directory, err)
 	}
 
 	return engine, nil
@@ -105,7 +100,7 @@ func (e *Engine) Get(key []byte) ([]byte, error) {
 
 		// Проходим по кандидатам и проверяем, действительно ли в них есть искомый ключ
 		for _, c := range candidates {
-			it, err := c.getReader().Iterator(nil, nil)
+			it, err := c.GetReader().Iterator(nil, nil)
 			if err != nil {
 				return nil, fmt.Errorf("lsm Get: iterator creation: %w", err)
 			}
@@ -126,7 +121,7 @@ func (e *Engine) Get(key []byte) ([]byte, error) {
 
 				// Нашли ключ
 				foundAugmentedValue = append(foundAugmentedValue, foundValue)
-				foundAugmentedValuesTimes = append(foundAugmentedValuesTimes, c.getCreationTime())
+				foundAugmentedValuesTimes = append(foundAugmentedValuesTimes, c.GetCreationTime())
 			}
 		}
 
@@ -228,7 +223,7 @@ func (e *Engine) flush() error {
 		return fmt.Errorf("lsm flush: creating memtable iterator: %w", err)
 	}
 
-	sstableWrapper, err := createSSTable(e.directory, memtableIterator)
+	sstableWrapper, err := CreateSSTable(e.directory, memtableIterator)
 	if err != nil {
 		return fmt.Errorf("lsm flush: creating sstable: %w", err)
 	}
@@ -266,7 +261,7 @@ func (e *Engine) flushIfNeeded() error {
 func (e *Engine) compaction() error {
 	for levelIndex := 0; levelIndex < e.getNumberOfLevels(); levelIndex++ {
 		levelNumber := levelIndex + 1
-		maxSSTablesNumber := int(math.Pow(T, float64(levelNumber)))
+		maxSSTablesNumber := int(math.Pow(e.levelBase, float64(levelNumber)))
 
 		if len(e.tables[levelIndex]) <= maxSSTablesNumber {
 			// На текущем уровне нет перегруза по количеству sstables
@@ -288,7 +283,7 @@ func (e *Engine) compaction() error {
 		for curLevelIndex := 0; curLevelIndex < len(e.tables[levelIndex]); curLevelIndex++ {
 			for nextLevelIndex := 0; nextLevelIndex < len(e.tables[levelIndex+1]); nextLevelIndex++ {
 				// Есть пересечение
-				if !doIntersect(e.tables[levelIndex][curLevelIndex], e.tables[levelIndex+1][nextLevelIndex]) {
+				if !DoIntersect(e.tables[levelIndex][curLevelIndex], e.tables[levelIndex+1][nextLevelIndex]) {
 					continue
 				}
 
@@ -340,7 +335,7 @@ func (e *Engine) compaction() error {
 
 			// TODO: копипаста с flush
 
-			sstableWrapper, err := createSSTable(e.directory, it)
+			sstableWrapper, err := CreateSSTable(e.directory, it)
 			if err != nil {
 				return fmt.Errorf("lsm compaction: creating sstable: %w", err)
 			}
@@ -412,7 +407,7 @@ func (e *Engine) compaction() error {
 
 			// TODO: копипаста с flush
 
-			sstableWrapper, err := createSSTable(e.directory, it)
+			sstableWrapper, err := CreateSSTable(e.directory, it)
 			if err != nil {
 				return fmt.Errorf("lsm compaction: creating sstable: %w", err)
 			}
@@ -461,7 +456,7 @@ func (e *Engine) initFromDirectory() error {
 		}
 
 		// Initialize an object for sstable
-		sstableWrapper, err := readSSTable(entry.Name(), directory)
+		sstableWrapper, err := ReadSSTable(entry.Name(), directory)
 		if err != nil {
 			return fmt.Errorf("lsm initFromDirectory: reading sstable %s: %w", entry.Name(), err)
 		}
