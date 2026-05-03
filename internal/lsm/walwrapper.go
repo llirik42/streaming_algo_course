@@ -10,16 +10,16 @@ const (
 	WALFileName = "wal"
 )
 
-type WALWrapper struct {
+type walWrapper struct {
 	file   *os.File
 	writer *wal.Writer
 }
 
-func (w *WALWrapper) GetWriter() *wal.Writer {
+func (w *walWrapper) getWriter() *wal.Writer {
 	return w.writer
 }
 
-func (w *WALWrapper) Close() error {
+func (w *walWrapper) close() error {
 	writerClosingError := w.writer.Close()
 	fileClosingError := w.file.Close()
 	return errors.Join(writerClosingError, fileClosingError)

@@ -11,13 +11,21 @@ import (
 	"time"
 )
 
-type SSTableWrapper struct {
+type sstableWrapper struct {
 	reader       *sstable.Reader
 	file         *os.File
 	creationTime time.Time
 }
 
-func CreateSSTable(directory string, recordsSource iterator.Iterator) (*SSTableWrapper, error) {
+func probablyContains(key []byte, wrapper *sstableWrapper) bool {
+	if bytes.Compare(wrapper.reader.GetFirstKey(), key) <= 0 && bytes.Compare(key, wrapper.reader.GetLastKey()) <= 0 {
+		return true
+	}
+
+	return false
+}
+
+func createSSTable(directory string, recordsSource iterator.Iterator) (*sstableWrapper, error) {
 	now := time.Now()
 	nowUnixNano := now.UnixNano()
 
@@ -57,14 +65,14 @@ func CreateSSTable(directory string, recordsSource iterator.Iterator) (*SSTableW
 		return nil, fmt.Errorf("lsm CreateSSTable: creating reader on %s: %w", filePath, err)
 	}
 
-	return &SSTableWrapper{
+	return &sstableWrapper{
 		reader:       reader,
 		file:         file,
 		creationTime: now,
 	}, nil
 }
 
-func ReadSSTable(name, directory string) (*SSTableWrapper, error) {
+func readSSTable(name, directory string) (*sstableWrapper, error) {
 	filePath := path.Join(directory, name)
 
 	// Opening file
@@ -92,14 +100,14 @@ func ReadSSTable(name, directory string) (*SSTableWrapper, error) {
 		return nil, fmt.Errorf("lsm ReadSSTable: invalid file name %s: %w", filePath, err)
 	}
 
-	return &SSTableWrapper{
+	return &sstableWrapper{
 		reader:       reader,
 		file:         file,
 		creationTime: time.Unix(0, creationTimeUnixNano),
 	}, nil
 }
 
-func DoIntersect(w1 *SSTableWrapper, w2 *SSTableWrapper) bool {
+func doIntersect(w1 *sstableWrapper, w2 *sstableWrapper) bool {
 	r1 := w1.reader
 	r2 := w2.reader
 
@@ -108,15 +116,15 @@ func DoIntersect(w1 *SSTableWrapper, w2 *SSTableWrapper) bool {
 	return cond1 && cond2
 }
 
-func (w *SSTableWrapper) GetReader() *sstable.Reader {
+func (w *sstableWrapper) getReader() *sstable.Reader {
 	return w.reader
 }
 
-func (w *SSTableWrapper) GetCreationTime() time.Time {
+func (w *sstableWrapper) getCreationTime() time.Time {
 	return w.creationTime
 }
 
-func (w *SSTableWrapper) Close() error {
+func (w *sstableWrapper) close() error {
 	if err := w.file.Close(); err != nil {
 		return fmt.Errorf("lsm SSTableWrapper.close(): closing file: %w", err)
 	}
@@ -124,7 +132,7 @@ func (w *SSTableWrapper) Close() error {
 	return nil
 }
 
-func (w *SSTableWrapper) Remove() error {
+func (w *sstableWrapper) remove() error {
 	if err := w.file.Close(); err != nil {
 		return fmt.Errorf("lsm SSTableWrapper.Remove(): closing file: %w", err)
 	}
@@ -134,12 +142,4 @@ func (w *SSTableWrapper) Remove() error {
 	}
 
 	return nil
-}
-
-func ProbablyContains(key []byte, wrapper *SSTableWrapper) bool {
-	if bytes.Compare(wrapper.reader.GetFirstKey(), key) <= 0 && bytes.Compare(key, wrapper.reader.GetLastKey()) <= 0 {
-		return true
-	}
-
-	return false
 }

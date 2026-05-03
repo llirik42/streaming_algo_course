@@ -28,9 +28,9 @@ type Engine struct {
 	memtableFlushThreshold int
 
 	levelBase float64
-	tables    [][]*SSTableWrapper
+	tables    [][]*sstableWrapper
 
-	wal *WALWrapper
+	wal *walWrapper
 
 	directory string
 }
@@ -38,7 +38,7 @@ type Engine struct {
 func Open(options Options) (*Engine, error) {
 	engine := &Engine{
 		memtable:               skiplist.New(int64(options.Seed)),
-		tables:                 make([][]*SSTableWrapper, 0),
+		tables:                 make([][]*sstableWrapper, 0),
 		directory:              options.Dir,
 		memtableFlushThreshold: options.MemtableFlushThreshold,
 		levelBase:              float64(options.LevelBase),
@@ -61,7 +61,7 @@ func (e *Engine) Put(key, value []byte) error {
 		Key:   key,
 		Value: value,
 	}
-	if err := e.wal.GetWriter().Append(walRecord); err != nil {
+	if err := e.wal.getWriter().Append(walRecord); err != nil {
 		return fmt.Errorf("lsm Put: adding record to WAL: %w", err)
 	}
 
@@ -100,7 +100,7 @@ func (e *Engine) Get(key []byte) ([]byte, error) {
 
 		// Проходим по кандидатам и проверяем, действительно ли в них есть искомый ключ
 		for _, c := range candidates {
-			it, err := c.GetReader().Iterator(nil, nil)
+			it, err := c.getReader().Iterator(nil, nil)
 			if err != nil {
 				return nil, fmt.Errorf("lsm Get: iterator creation: %w", err)
 			}
@@ -121,7 +121,7 @@ func (e *Engine) Get(key []byte) ([]byte, error) {
 
 				// Нашли ключ
 				foundAugmentedValue = append(foundAugmentedValue, foundValue)
-				foundAugmentedValuesTimes = append(foundAugmentedValuesTimes, c.GetCreationTime())
+				foundAugmentedValuesTimes = append(foundAugmentedValuesTimes, c.getCreationTime())
 			}
 		}
 
@@ -164,7 +164,7 @@ func (e *Engine) Delete(key []byte) error {
 		Type: wal.OpDelete,
 		Key:  key,
 	}
-	if err := e.wal.GetWriter().Append(walRecord); err != nil {
+	if err := e.wal.getWriter().Append(walRecord); err != nil {
 		return fmt.Errorf("lsm Delete: adding record to WAL: %w", err)
 	}
 
@@ -204,12 +204,12 @@ func (e *Engine) Scan(start []byte, end []byte) (iterator.Iterator, error) {
 func (e *Engine) Close() error {
 	// 1 - для ошибки закрытия WAL
 	errorsList := make([]error, 1+e.getTotalNumberOfTables())
-	errorsList[0] = e.wal.Close()
+	errorsList[0] = e.wal.close()
 
 	errorIndex := 1
 	for levelIndex := 0; levelIndex < e.getNumberOfLevels(); levelIndex++ {
 		for _, sstableWrapper := range e.getTables(levelIndex) {
-			errorsList[errorIndex] = sstableWrapper.Close()
+			errorsList[errorIndex] = sstableWrapper.close()
 			errorIndex++
 		}
 	}
@@ -223,7 +223,7 @@ func (e *Engine) flush() error {
 		return fmt.Errorf("lsm flush: creating memtable iterator: %w", err)
 	}
 
-	sstableWrapper, err := CreateSSTable(e.directory, memtableIterator)
+	sstableWrapper, err := createSSTable(e.directory, memtableIterator)
 	if err != nil {
 		return fmt.Errorf("lsm flush: creating sstable: %w", err)
 	}
@@ -232,7 +232,7 @@ func (e *Engine) flush() error {
 	e.memtableSize = 0
 
 	// Очистка WAL
-	if err := e.wal.Close(); err != nil {
+	if err := e.wal.close(); err != nil {
 		return fmt.Errorf("lsm flush: closing WAL writer: %w", err)
 	}
 	if err := e.initWAL(); err != nil {
@@ -273,7 +273,7 @@ func (e *Engine) compaction() error {
 			// Тогда просто перемещаем первый sstable из текущего уровня на следующий
 			firstTable := e.tables[levelIndex][0]
 			e.tables[levelIndex] = e.tables[levelIndex][1:] // TODO: оптимизировать!
-			e.tables = append(e.tables, []*SSTableWrapper{firstTable})
+			e.tables = append(e.tables, []*sstableWrapper{firstTable})
 			break
 		}
 
@@ -283,7 +283,7 @@ func (e *Engine) compaction() error {
 		for curLevelIndex := 0; curLevelIndex < len(e.tables[levelIndex]); curLevelIndex++ {
 			for nextLevelIndex := 0; nextLevelIndex < len(e.tables[levelIndex+1]); nextLevelIndex++ {
 				// Есть пересечение
-				if !DoIntersect(e.tables[levelIndex][curLevelIndex], e.tables[levelIndex+1][nextLevelIndex]) {
+				if !doIntersect(e.tables[levelIndex][curLevelIndex], e.tables[levelIndex+1][nextLevelIndex]) {
 					continue
 				}
 
@@ -335,14 +335,14 @@ func (e *Engine) compaction() error {
 
 			// TODO: копипаста с flush
 
-			sstableWrapper, err := CreateSSTable(e.directory, it)
+			sstableWrapper, err := createSSTable(e.directory, it)
 			if err != nil {
 				return fmt.Errorf("lsm compaction: creating sstable: %w", err)
 			}
 
 			// Удаляем все sstable текущего уровня
 			for _, r := range e.tables[levelIndex] {
-				if err := r.Remove(); err != nil {
+				if err := r.remove(); err != nil {
 					return fmt.Errorf("lsm compaction: removing sstable file: %w", err)
 				}
 			}
@@ -351,7 +351,7 @@ func (e *Engine) compaction() error {
 			// Удаляем sstable следующего уровня
 			for _, i := range allNextLevelIndexes {
 				r := e.tables[levelIndex+1][i]
-				if err := r.Remove(); err != nil {
+				if err := r.remove(); err != nil {
 					return fmt.Errorf("lsm compaction: removing sstable file: %w", err)
 				}
 			}
@@ -407,14 +407,14 @@ func (e *Engine) compaction() error {
 
 			// TODO: копипаста с flush
 
-			sstableWrapper, err := CreateSSTable(e.directory, it)
+			sstableWrapper, err := createSSTable(e.directory, it)
 			if err != nil {
 				return fmt.Errorf("lsm compaction: creating sstable: %w", err)
 			}
 
 			// Удаляем sstable с текущего уровня
 			r := e.tables[levelIndex][minIntersectionIndex]
-			if err := r.Remove(); err != nil {
+			if err := r.remove(); err != nil {
 				return fmt.Errorf("lsm compaction: removing sstable file: %w", err)
 			}
 			e.tables[levelIndex] = append(e.tables[levelIndex][:minIntersectionIndex], e.tables[levelIndex][minIntersectionIndex+1:]...)
@@ -422,7 +422,7 @@ func (e *Engine) compaction() error {
 			// Удаляем sstable следующего уровня
 			for _, i := range nextLevelSSTablesIndexes {
 				r := e.tables[levelIndex+1][i]
-				if err := r.Remove(); err != nil {
+				if err := r.remove(); err != nil {
 					return fmt.Errorf("lsm compaction: removing sstable file: %w", err)
 				}
 			}
@@ -456,7 +456,7 @@ func (e *Engine) initFromDirectory() error {
 		}
 
 		// Initialize an object for sstable
-		sstableWrapper, err := ReadSSTable(entry.Name(), directory)
+		sstableWrapper, err := readSSTable(entry.Name(), directory)
 		if err != nil {
 			return fmt.Errorf("lsm initFromDirectory: reading sstable %s: %w", entry.Name(), err)
 		}
@@ -552,7 +552,7 @@ func (e *Engine) initWAL() error {
 		return fmt.Errorf("lsm initWAL: creating WAL file %s: %w", walFilePath, err)
 	}
 
-	e.wal = &WALWrapper{
+	e.wal = &walWrapper{
 		file:   walFile,
 		writer: wal.NewWriter(walFile),
 	}
@@ -574,11 +574,11 @@ func (e *Engine) addToMemtable(key []byte, value []byte) error {
 	return nil
 }
 
-func (e *Engine) findKeyCandidates(key []byte, levelIndex int) []*SSTableWrapper {
+func (e *Engine) findKeyCandidates(key []byte, levelIndex int) []*sstableWrapper {
 	currentLevelTables := e.getTables(levelIndex)
 
 	if levelIndex == 0 {
-		candidates := make([]*SSTableWrapper, 0, len(currentLevelTables))
+		candidates := make([]*sstableWrapper, 0, len(currentLevelTables))
 
 		for _, table := range currentLevelTables {
 			if probablyContains(key, table) {
@@ -591,19 +591,11 @@ func (e *Engine) findKeyCandidates(key []byte, levelIndex int) []*SSTableWrapper
 
 	for _, table := range currentLevelTables {
 		if probablyContains(key, table) {
-			return []*SSTableWrapper{table}
+			return []*sstableWrapper{table}
 		}
 	}
 
-	return make([]*SSTableWrapper, 0)
-}
-
-func probablyContains(key []byte, wrapper *SSTableWrapper) bool {
-	if bytes.Compare(wrapper.reader.GetFirstKey(), key) <= 0 && bytes.Compare(key, wrapper.reader.GetLastKey()) <= 0 {
-		return true
-	}
-
-	return false
+	return make([]*sstableWrapper, 0)
 }
 
 func (e *Engine) hasTables() bool {
@@ -614,11 +606,11 @@ func (e *Engine) getNumberOfLevels() int {
 	return len(e.tables)
 }
 
-func (e *Engine) getTables(levelIndex int) []*SSTableWrapper {
+func (e *Engine) getTables(levelIndex int) []*sstableWrapper {
 	return e.tables[levelIndex]
 }
 
-func (e *Engine) getTable(levelIndex int, tableIndex int) *SSTableWrapper {
+func (e *Engine) getTable(levelIndex int, tableIndex int) *sstableWrapper {
 	return e.tables[levelIndex][tableIndex]
 }
 
@@ -640,10 +632,10 @@ func (e *Engine) getTotalNumberOfTables() int {
 	return result
 }
 
-func (e *Engine) pushTable(sstableWrapper *SSTableWrapper) {
+func (e *Engine) pushTable(wrapper *sstableWrapper) {
 	if len(e.tables) == 0 {
-		e.tables = [][]*SSTableWrapper{{sstableWrapper}}
+		e.tables = [][]*sstableWrapper{{wrapper}}
 	} else {
-		e.tables[0] = append(e.tables[0], sstableWrapper)
+		e.tables[0] = append(e.tables[0], wrapper)
 	}
 }

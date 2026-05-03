@@ -37,7 +37,7 @@ func (ps *pairSource) disallowMoving() {
 func createSSTablePairSource(e *Engine, levelIndex, tableIndex int, start, end []byte) (*pairSource, error) {
 	table := e.getTable(levelIndex, tableIndex)
 
-	tableIterator, err := table.GetReader().Iterator(start, end)
+	tableIterator, err := table.getReader().Iterator(start, end)
 	if err != nil {
 		return nil, fmt.Errorf("lsm iterator.createSSTablePairSource: get table iterator %d-%d: %w", levelIndex, tableIndex, err)
 	}
@@ -48,7 +48,7 @@ func createSSTablePairSource(e *Engine, levelIndex, tableIndex int, start, end [
 			indexOfLevel:     levelIndex,
 			indexInsideLevel: tableIndex,
 			isAllowedToMove:  true,
-			creationTime:     table.GetCreationTime(),
+			creationTime:     table.getCreationTime(),
 		},
 	}, nil
 }

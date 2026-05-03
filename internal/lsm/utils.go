@@ -34,7 +34,7 @@ func (s *pairSorter) Less(i, j int) bool {
 	return s.by(&s.pairs[i], &s.pairs[j])
 }
 
-func removeByIndexes(slice []*SSTableWrapper, indexes []int) []*SSTableWrapper {
+func removeByIndexes(slice []*sstableWrapper, indexes []int) []*sstableWrapper {
 	sort.Sort(sort.Reverse(sort.IntSlice(indexes)))
 
 	for _, i := range indexes {

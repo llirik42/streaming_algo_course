@@ -95,7 +95,7 @@ func closeIteratorSuccess(data testData, iterator kv.Iterator) {
 	t := data.t
 
 	if err := iterator.Close(); err != nil {
-		t.Fatalf("iterator Close failed: %v", err)
+		t.Fatalf("iterator close failed: %v", err)
 	}
 }
 
@@ -156,7 +156,7 @@ func TestLSMStore_PersistAcrossRestart(t *testing.T) {
 		t.Fatalf("Put: %v", err)
 	}
 	if err := s.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
+		t.Fatalf("close: %v", err)
 	}
 
 	s2, err := Open(Options{Dir: dir})

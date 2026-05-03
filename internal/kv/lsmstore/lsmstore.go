@@ -3,31 +3,10 @@ package lsmstore
 import (
 	"context"
 	"fmt"
-	"kvschool/internal/iterator"
 	"kvschool/internal/kv"
 	"kvschool/internal/lsm"
 )
 
-const (
-	MemtableFlushThreshold = 0
-)
-
-type Iterator struct {
-	lsmIterator iterator.Iterator
-}
-
-func (it *Iterator) Next() (kv.Pair, bool, error) {
-	key, value, ok, err := it.lsmIterator.Next()
-	pair := kv.Pair{Key: key, Value: value}
-	return pair, ok, err
-}
-
-func (it *Iterator) Close() error {
-	return it.lsmIterator.Close()
-}
-
-// Store — KV поверх LSM.
-// В практической реализации вам нужно использовать пакеты internal/lsm, internal/sstable, internal/wal.
 type Store struct {
 	engine *lsm.Engine
 }
