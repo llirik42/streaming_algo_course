@@ -16,8 +16,7 @@ import (
 var ErrNotFound = errors.New("lsm: ключ не найден")
 
 const (
-	T           = 2
-	WALFileName = "wal"
+	T = 2
 )
 
 type Options struct {
@@ -31,9 +30,7 @@ type Engine struct {
 	memtableFlushThreshold int
 
 	tables [][]*SSTableWrapper
-
-	walFile   *os.File
-	walWriter *wal.Writer
+	wal    *WALWrapper
 
 	directory string
 }
@@ -69,7 +66,7 @@ func (e *Engine) Put(key, value []byte) error {
 		Key:   key,
 		Value: value,
 	}
-	if err := e.walWriter.Append(walRecord); err != nil {
+	if err := e.wal.GetWriter().Append(walRecord); err != nil {
 		return fmt.Errorf("lsm Put: adding record to WAL: %w", err)
 	}
 
@@ -172,7 +169,7 @@ func (e *Engine) Delete(key []byte) error {
 		Type: wal.OpDelete,
 		Key:  key,
 	}
-	if err := e.walWriter.Append(walRecord); err != nil {
+	if err := e.wal.GetWriter().Append(walRecord); err != nil {
 		return fmt.Errorf("lsm Delete: adding record to WAL: %w", err)
 	}
 
@@ -210,18 +207,19 @@ func (e *Engine) Scan(start []byte, end []byte) (iterator.Iterator, error) {
 }
 
 func (e *Engine) Close() error {
-	walClosingError := e.walWriter.Close()
-	walFileClosingError := e.walFile.Close()
+	// 1 - для ошибки закрытия WAL
+	errorsList := make([]error, 1+e.getTotalNumberOfTables())
+	errorsList[0] = e.wal.Close()
 
-	for i := 0; i < e.getNumberOfLevels(); i++ {
-		for j, sstableWrapper := range e.getTables(i) {
-			if err := sstableWrapper.Close(); err != nil {
-				return fmt.Errorf("lsm Close: closing sstable file %d-%d: %w", i, j, err)
-			}
+	errorIndex := 1
+	for levelIndex := 0; levelIndex < e.getNumberOfLevels(); levelIndex++ {
+		for _, sstableWrapper := range e.getTables(levelIndex) {
+			errorsList[errorIndex] = sstableWrapper.Close()
+			errorIndex++
 		}
 	}
 
-	return errors.Join(walClosingError, walFileClosingError)
+	return errors.Join(errorsList...)
 }
 
 func (e *Engine) flush() error {
@@ -239,11 +237,8 @@ func (e *Engine) flush() error {
 	e.memtableSize = 0
 
 	// Очистка WAL
-	if err := e.walWriter.Close(); err != nil {
+	if err := e.wal.Close(); err != nil {
 		return fmt.Errorf("lsm flush: closing WAL writer: %w", err)
-	}
-	if err := e.walFile.Close(); err != nil {
-		return fmt.Errorf("lsm flush: closing WAL file: %w", err)
 	}
 	if err := e.initWAL(); err != nil {
 		return fmt.Errorf("lsm flush: resetting WAL: %w", err)
@@ -562,8 +557,10 @@ func (e *Engine) initWAL() error {
 		return fmt.Errorf("lsm initWAL: creating WAL file %s: %w", walFilePath, err)
 	}
 
-	e.walFile = walFile
-	e.walWriter = wal.NewWriter(walFile)
+	e.wal = &WALWrapper{
+		file:   walFile,
+		writer: wal.NewWriter(walFile),
+	}
 
 	return nil
 }
@@ -636,6 +633,16 @@ func (e *Engine) getMemtable() *skiplist.SkipList {
 
 func (e *Engine) getNumberOfTables(levelIndex int) int {
 	return len(e.tables[levelIndex])
+}
+
+func (e *Engine) getTotalNumberOfTables() int {
+	result := 0
+
+	for levelIndex := 0; levelIndex < e.getNumberOfLevels(); levelIndex++ {
+		result += e.getNumberOfTables(levelIndex)
+	}
+
+	return result
 }
 
 func (e *Engine) pushTable(sstableWrapper *SSTableWrapper) {
