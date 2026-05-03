@@ -294,23 +294,22 @@ func (e *Engine) compaction() error {
 		if levelIndex == 0 {
 			// Рассматриваем все таблицы текущего (нулевого) уровня, так как они могут пересекаться по ключам
 
+			// Ищем таблицы следующего уровня, которые пересекаются с таблицами текущего
 			var allNextLevelIndexesMap = map[int]int{}
-
 			for curLevelIndex := 0; curLevelIndex < len(e.tables[levelIndex]); curLevelIndex++ {
 				for _, i := range intersectionTable[curLevelIndex] {
 					allNextLevelIndexesMap[i] = i
 				}
 			}
-
 			allNextLevelIndexes := make([]int, 0, len(allNextLevelIndexesMap))
 			for _, i := range allNextLevelIndexesMap {
 				allNextLevelIndexes = append(allNextLevelIndexes, i)
 			}
 
+			// Создаём итератор
 			bottomLevelSources := make([][]*pairSource, 2)
 			bottomLevelSources[0] = make([]*pairSource, e.getNumberOfTables(levelIndex))
 			bottomLevelSources[1] = make([]*pairSource, len(allNextLevelIndexes))
-
 			for index := 0; index < e.getNumberOfTables(levelIndex); index++ {
 				ps, err := createSSTablePairSource(e, levelIndex, index, nil, nil)
 				if err != nil {
@@ -318,7 +317,6 @@ func (e *Engine) compaction() error {
 				}
 				bottomLevelSources[0][index] = ps
 			}
-
 			nextLevelIndex := levelIndex + 1
 			for i, tableIndex := range allNextLevelIndexes {
 				ps, err := createSSTablePairSource(e, nextLevelIndex, tableIndex, nil, nil)
@@ -327,20 +325,18 @@ func (e *Engine) compaction() error {
 				}
 				bottomLevelSources[1][i] = ps
 			}
-
 			it := &Iterator{
 				bottomLevelSources: bottomLevelSources,
 				trackTombstones:    true,
 			}
 
-			// TODO: копипаста с flush
-
+			// Создаём новую таблицу
 			sstableWrapper, err := createSSTable(e.directory, it)
 			if err != nil {
 				return fmt.Errorf("lsm compaction: creating sstable: %w", err)
 			}
 
-			// Удаляем все sstable текущего уровня
+			// Удаляем все таблицы текущего уровня
 			for _, r := range e.tables[levelIndex] {
 				if err := r.remove(); err != nil {
 					return fmt.Errorf("lsm compaction: removing sstable file: %w", err)
@@ -348,7 +344,7 @@ func (e *Engine) compaction() error {
 			}
 			e.tables[levelIndex] = e.tables[levelIndex][:0]
 
-			// Удаляем sstable следующего уровня
+			// Удаляем таблицы следующего уровня (с которыми было пересечение)
 			for _, i := range allNextLevelIndexes {
 				r := e.tables[levelIndex+1][i]
 				if err := r.remove(); err != nil {
@@ -357,12 +353,12 @@ func (e *Engine) compaction() error {
 			}
 			e.tables[levelIndex+1] = removeByIndexes(e.tables[levelIndex+1], allNextLevelIndexes)
 
-			// Добавляем новый sstable на след уровень
+			// Добавляем новую таблицу на следующий уровень
 			e.tables[levelIndex+1] = append(e.tables[levelIndex+1], sstableWrapper)
-			continue
 		} else {
 			// Рассматриваем лишь одну таблицу текущего уровня (которая пересекается с наим числом таблиц следующего)
 
+			// Ищем таблицу текущего уровня, которая пересекается с наименьшим числом таблиц следующего
 			minIntersectionIndex := 0
 			for i := 1; i < len(intersectionTable); i++ {
 				if len(intersectionTable[i]) < len(intersectionTable[minIntersectionIndex]) {
@@ -378,62 +374,53 @@ func (e *Engine) compaction() error {
 				continue
 			}
 
-			nextLevelSSTablesIndexes := intersectionTable[minIntersectionIndex]
-
-			// TODO: копипаста с Next
+			// Создаём итератор
+			nextLevelTablesIndexes := intersectionTable[minIntersectionIndex]
 			bottomLevelSources := make([][]*pairSource, 2)
-
 			ps, err := createSSTablePairSource(e, levelIndex, minIntersectionIndex, nil, nil)
 			if err != nil {
 				return fmt.Errorf("lsm compaction: creating sstable pair source %d-%d: %w", levelIndex, minIntersectionIndex, err)
 			}
 			bottomLevelSources[0] = []*pairSource{ps}
-
-			bottomLevelSources[1] = make([]*pairSource, len(nextLevelSSTablesIndexes))
-
+			bottomLevelSources[1] = make([]*pairSource, len(nextLevelTablesIndexes))
 			nextLevelIndex := levelIndex + 1
-			for index := 0; index < len(nextLevelSSTablesIndexes); index++ {
+			for index := 0; index < len(nextLevelTablesIndexes); index++ {
 				ps, err := createSSTablePairSource(e, nextLevelIndex, index, nil, nil)
 				if err != nil {
 					return fmt.Errorf("lsm compaction: creating sstable pair source %d-%d: %w", nextLevelIndex, index, err)
 				}
 				bottomLevelSources[1][index] = ps
 			}
-
 			it := &Iterator{
 				bottomLevelSources: bottomLevelSources,
 				trackTombstones:    true,
 			}
 
-			// TODO: копипаста с flush
-
-			sstableWrapper, err := createSSTable(e.directory, it)
+			// Создаём новую таблицу
+			newTable, err := createSSTable(e.directory, it)
 			if err != nil {
 				return fmt.Errorf("lsm compaction: creating sstable: %w", err)
 			}
 
-			// Удаляем sstable с текущего уровня
-			r := e.tables[levelIndex][minIntersectionIndex]
-			if err := r.remove(); err != nil {
+			// Удаляем таблицу с текущего уровня
+			t := e.tables[levelIndex][minIntersectionIndex]
+			if err := t.remove(); err != nil {
 				return fmt.Errorf("lsm compaction: removing sstable file: %w", err)
 			}
 			e.tables[levelIndex] = append(e.tables[levelIndex][:minIntersectionIndex], e.tables[levelIndex][minIntersectionIndex+1:]...)
 
-			// Удаляем sstable следующего уровня
-			for _, i := range nextLevelSSTablesIndexes {
-				r := e.tables[levelIndex+1][i]
-				if err := r.remove(); err != nil {
+			// Удаляем таблицы следующего уровня (с которыми было пересечение)
+			for _, i := range nextLevelTablesIndexes {
+				t := e.tables[levelIndex+1][i]
+				if err := t.remove(); err != nil {
 					return fmt.Errorf("lsm compaction: removing sstable file: %w", err)
 				}
 			}
-			e.tables[levelIndex+1] = removeByIndexes(e.tables[levelIndex+1], nextLevelSSTablesIndexes)
+			e.tables[levelIndex+1] = removeByIndexes(e.tables[levelIndex+1], nextLevelTablesIndexes)
 
-			// Добавляем новый sstable на след уровень
-			e.tables[levelIndex+1] = append(e.tables[levelIndex+1], sstableWrapper)
-
-			continue
+			// Добавляем новую таблицу на следующий уровень
+			e.tables[levelIndex+1] = append(e.tables[levelIndex+1], newTable)
 		}
-
 	}
 
 	return nil
