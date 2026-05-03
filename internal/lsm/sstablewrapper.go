@@ -1,8 +1,8 @@
 package lsm
 
 import (
-	"bytes"
 	"fmt"
+	. "kvschool/internal/helpers"
 	"kvschool/internal/iterator"
 	"kvschool/internal/sstable"
 	"os"
@@ -18,7 +18,7 @@ type sstableWrapper struct {
 }
 
 func probablyContains(key []byte, wrapper *sstableWrapper) bool {
-	if bytes.Compare(wrapper.reader.GetFirstKey(), key) <= 0 && bytes.Compare(key, wrapper.reader.GetLastKey()) <= 0 {
+	if CompareKeys(wrapper.reader.GetFirstKey(), key) <= 0 && CompareKeys(key, wrapper.reader.GetLastKey()) <= 0 {
 		return true
 	}
 
@@ -111,8 +111,8 @@ func doIntersect(w1 *sstableWrapper, w2 *sstableWrapper) bool {
 	r1 := w1.reader
 	r2 := w2.reader
 
-	cond1 := bytes.Compare(r2.GetFirstKey(), r1.GetLastKey()) <= 0
-	cond2 := bytes.Compare(r1.GetFirstKey(), r2.GetLastKey()) <= 0
+	cond1 := CompareKeys(r2.GetFirstKey(), r1.GetLastKey()) <= 0
+	cond2 := CompareKeys(r1.GetFirstKey(), r2.GetLastKey()) <= 0
 	return cond1 && cond2
 }
 

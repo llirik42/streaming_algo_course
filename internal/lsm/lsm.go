@@ -1,9 +1,9 @@
 package lsm
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
+	. "kvschool/internal/helpers"
 	"kvschool/internal/iterator"
 	"kvschool/internal/skiplist"
 	"kvschool/internal/wal"
@@ -114,7 +114,7 @@ func (e *Engine) Get(key []byte) ([]byte, error) {
 					break
 				}
 
-				if !bytes.Equal(key, foundKey) {
+				if !KeysEqual(key, foundKey) {
 					// Не нашли текущий ключ
 					continue
 				}

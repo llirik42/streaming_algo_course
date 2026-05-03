@@ -21,6 +21,10 @@ func KeysEqual(key1, key2 []byte) bool {
 	return bytes.Equal(key1, key2)
 }
 
+func ValuesEqual(v1, v2 []byte) bool {
+	return bytes.Equal(v1, v2)
+}
+
 func CompareKeys(key1, key2 []byte) int {
 	return bytes.Compare(key1, key2)
 }

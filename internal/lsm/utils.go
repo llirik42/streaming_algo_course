@@ -1,13 +1,13 @@
 package lsm
 
 import (
-	"bytes"
+	. "kvschool/internal/helpers"
 	"sort"
 )
 
 func sortPairs(pairs []iteratorPair) {
 	by := func(p1, p2 *iteratorPair) bool {
-		return bytes.Compare(p1.key, p2.key) <= 0
+		return CompareKeys(p1.key, p2.key) <= 0
 	}
 
 	ps := &pairSorter{

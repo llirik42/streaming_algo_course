@@ -1,9 +1,9 @@
 package lsm
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
+	. "kvschool/internal/helpers"
 	"kvschool/internal/iterator"
 	"log"
 	"time"
@@ -210,7 +210,7 @@ func (it *Iterator) processSource(source *pairSource) (bool, error) {
 	if ok {
 		found := false
 		for pairIndex, pair := range it.pairs {
-			if bytes.Equal(pair.key, key) {
+			if KeysEqual(pair.key, key) {
 				found = true
 
 				// Мы более новые, поэтому меняем value по ключу

@@ -90,7 +90,7 @@ func TestSSTable_Simple(t *testing.T) {
 		if !KeysEqual(key, expectedKeys[i]) {
 			t.Errorf("iterator.Next() returned key=%q; want %q", key, expectedKeys[i])
 		}
-		if !bytes.Equal(value, expectedValues[i]) {
+		if !ValuesEqual(value, expectedValues[i]) {
 			t.Errorf("iterator.Next() returned value=%q; want %q", value, expectedValues[i])
 		}
 	}
@@ -153,7 +153,7 @@ func TestSSTable_IteratorClose(t *testing.T) {
 		if !KeysEqual(key, expectedKeys[i]) {
 			t.Errorf("iterator.Next() returned key=%q; want %q", key, expectedKeys[i])
 		}
-		if !bytes.Equal(value, expectedValues[i]) {
+		if !ValuesEqual(value, expectedValues[i]) {
 			t.Errorf("iterator.Next() returned value=%q; want %q", value, expectedValues[i])
 		}
 	}

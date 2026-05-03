@@ -3,7 +3,6 @@
 package skiplist
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	. "kvschool/internal/helpers"
@@ -29,7 +28,7 @@ func TestSkipList_BasicCRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get a: %v", err)
 	}
-	if !bytes.Equal(v, []byte("1")) {
+	if !ValuesEqual(v, []byte("1")) {
 		t.Fatalf("Get a mismatch: %q", string(v))
 	}
 
@@ -93,7 +92,7 @@ func TestSkipList_BasicOperations(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Get %d: %v", i, err)
 		}
-		if !bytes.Equal(realValue, expectedValue) {
+		if !ValuesEqual(realValue, expectedValue) {
 			t.Fatalf("Get %d: expected %s, got %s", i, expectedValue, realValue)
 		}
 	}
@@ -108,7 +107,7 @@ func TestSkipList_BasicOperations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get %s: %v", keyToCheck, err)
 	}
-	if !bytes.Equal(keyToCheckRealValue, keyToCheckNewValue) {
+	if !KeysEqual(keyToCheckRealValue, keyToCheckNewValue) {
 		t.Fatalf("Get %s: expected %s, got %s", keyToCheck, keyToCheckNewValue, keyToCheckRealValue)
 	}
 
@@ -241,10 +240,10 @@ func TestSkipList_ScanSingle(t *testing.T) {
 		if !ok {
 			t.Fatalf("Next: expected ok, got not ok on %d", i+1)
 		}
-		if !bytes.Equal(k, key) {
+		if !KeysEqual(k, key) {
 			t.Fatalf("Next: expected key %s, got %s on %d", key, k, i+1)
 		}
-		if !bytes.Equal(value, v) {
+		if !ValuesEqual(value, v) {
 			t.Fatalf("Next: expected value %s, got %s on %d", value, v, i+1)
 		}
 	}
