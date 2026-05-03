@@ -154,7 +154,13 @@ func initStore(kind string) (kv.Store, error) {
 	case "skiplist":
 		return memSkipListDefault(), nil
 	case "lsm":
-		store, err := lsmstore.Open(lsmstore.Options{Dir: "/home/llirik42/db"})
+		dir := "/home/llirik42/db"
+
+		if err := os.RemoveAll(dir); err != nil {
+			log.Fatalf("remove dir %q: %v", dir, err)
+		}
+
+		store, err := lsmstore.Open(lsmstore.Options{Dir: dir})
 		if err != nil {
 			log.Fatalf("open: %v", err)
 		}
