@@ -269,10 +269,6 @@ func (e *Engine) flushIfNeeded() error {
 }
 
 func (e *Engine) compaction() error {
-	if 2 == 2 {
-		return nil
-	}
-
 	for levelIndex := 0; levelIndex < e.getNumberOfLevels(); levelIndex++ {
 		levelNumber := levelIndex + 1
 		maxSSTablesNumber := int(math.Pow(T, float64(levelNumber)))
@@ -311,7 +307,7 @@ func (e *Engine) compaction() error {
 			var allNextLevelIndexesMap = map[int]int{}
 
 			for curLevelIndex := 0; curLevelIndex < len(e.tables[levelIndex]); curLevelIndex++ {
-				for _, i := range intersectionTable[levelIndex] {
+				for _, i := range intersectionTable[curLevelIndex] {
 					allNextLevelIndexesMap[i] = i
 				}
 			}
@@ -587,22 +583,35 @@ func (e *Engine) addToMemtable(key []byte, value []byte) error {
 }
 
 func (e *Engine) findKeyCandidates(key []byte, levelIndex int) []*SSTableWrapper {
-	currentLevelTables := e.tables[levelIndex]
+	currentLevelTables := e.getTables(levelIndex)
 
 	if levelIndex == 0 {
-		return currentLevelTables
+		candidates := make([]*SSTableWrapper, 0, len(currentLevelTables))
+
+		for _, table := range currentLevelTables {
+			if probablyContains(key, table) {
+				candidates = append(candidates, table)
+			}
+		}
+
+		return candidates
 	}
 
-	for _, t := range currentLevelTables {
-		r := t.getReader()
-		if bytes.Compare(r.GetFirstKey(), key) <= 0 && bytes.Compare(key, r.GetLastKey()) <= 0 {
-			res := make([]*SSTableWrapper, 1)
-			res[0] = t
-			return res
+	for _, table := range currentLevelTables {
+		if probablyContains(key, table) {
+			return []*SSTableWrapper{table}
 		}
 	}
 
 	return make([]*SSTableWrapper, 0)
+}
+
+func probablyContains(key []byte, wrapper *SSTableWrapper) bool {
+	if bytes.Compare(wrapper.reader.GetFirstKey(), key) <= 0 && bytes.Compare(key, wrapper.reader.GetLastKey()) <= 0 {
+		return true
+	}
+
+	return false
 }
 
 func (e *Engine) hasTables() bool {

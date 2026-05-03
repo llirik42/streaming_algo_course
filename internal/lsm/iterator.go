@@ -117,7 +117,7 @@ func (it *Iterator) Next() (key []byte, value []byte, ok bool, err error) {
 	}
 
 	for {
-		memTableOk, err := it.processSource(it.topLevelSource)
+		topLevelOk, err := it.processSource(it.topLevelSource)
 		if err != nil {
 			return nil, nil, false, fmt.Errorf("lsm Iterator.Next: processing memtable iterator: %w", err)
 		}
@@ -137,7 +137,7 @@ func (it *Iterator) Next() (key []byte, value []byte, ok bool, err error) {
 		sortPairs(it.pairs)
 
 		if len(it.pairs) == 0 {
-			if !memTableOk && !hasBottomIteratorsAllowedToMove {
+			if !topLevelOk && !hasBottomIteratorsAllowedToMove {
 				it.isEmpty = true
 				break
 			} else {
@@ -183,11 +183,7 @@ func (it *Iterator) Close() error {
 }
 
 func (it *Iterator) processSource(source *pairSource) (bool, error) {
-	if source == nil {
-		return false, nil
-	}
-
-	if !source.info.isAllowedToMove {
+	if source == nil || !source.info.isAllowedToMove {
 		return false, nil
 	}
 
@@ -197,6 +193,7 @@ func (it *Iterator) processSource(source *pairSource) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("lsm Iterator.processSource(): getting new pair: %w", err)
 	}
+	source.info.isAllowedToMove = false
 
 	if ok {
 		found := false
@@ -208,6 +205,8 @@ func (it *Iterator) processSource(source *pairSource) (bool, error) {
 				previousSource := pair.source
 				if comparePairSources(source, previousSource) > 0 {
 					it.updatePairs(pairIndex, value, source)
+				} else {
+					source.info.isAllowedToMove = true
 				}
 			}
 		}
@@ -215,10 +214,7 @@ func (it *Iterator) processSource(source *pairSource) (bool, error) {
 		if !found {
 			it.pushPair(key, value, source)
 		}
-
 	}
-
-	source.info.isAllowedToMove = false
 
 	return true, nil
 }
