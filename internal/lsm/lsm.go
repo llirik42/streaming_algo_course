@@ -509,7 +509,7 @@ func (e *Engine) recoverFromWAL() error {
 		}
 
 		if record.Type == wal.OpPut {
-			if err := e.addToMemtable(record.Key, record.Value); err != nil {
+			if err := e.Put(record.Key, record.Value); err != nil {
 				return fmt.Errorf("lsm recoverFromWAL: recovery crash put: %w", err)
 			}
 		}
