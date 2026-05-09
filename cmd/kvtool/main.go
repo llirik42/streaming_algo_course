@@ -18,27 +18,56 @@ import (
 	"kvschool/internal/testutil"
 )
 
-func main() {
-	if len(os.Args) < 2 {
-		usage()
-		os.Exit(2)
+func setBit(b *uint8, i int, v uint8) {
+	if v != 0 && v != 1 {
+		panic("Invalid value")
 	}
 
-	switch os.Args[1] {
-	case "wordcount":
-		if err := runWordCount(os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, "ошибка:", err)
-			os.Exit(1)
-		}
-	case "load":
-		if err := runLoad(os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, "ошибка:", err)
-			os.Exit(1)
-		}
-	default:
-		usage()
-		os.Exit(2)
+	if v == 1 {
+		*b |= 1 << i
+	} else {
+		*b &= ^(1 << i)
 	}
+}
+
+func getBit(b *uint8, i int) uint8 {
+	return (1 << i & *b) >> i
+}
+
+func main() {
+	//hf := fnv.New64()
+	//
+	//_, _ = hf.Write(helpers.StringToBytes("key"))
+	//fmt.Println(hf.Sum64())
+	//hf.Reset()
+	//
+	//_, _ = hf.Write(helpers.StringToBytes("key-1"))
+	//fmt.Println(hf.Sum64())
+	//hf.Reset()
+	//
+	//_, _ = hf.Write(helpers.StringToBytes("key"))
+	//fmt.Println(hf.Sum64())
+	//hf.Reset()
+
+	//var b uint8 = 0
+	//fmt.Println(b)
+	//
+	//setBit(&b, 5, 1)
+	//fmt.Println(b)
+	//fmt.Println(getBit(&b, 1))
+
+	size := 10
+	//fmt.Println(math.Ceil(float64(size) / float64(8)))
+	bytesSize := size>>3 + 1
+	fmt.Println(bytesSize)
+
+	index := 1
+
+	byteIndex := index >> 3
+
+	bitIndex := index & 7
+
+	fmt.Println(byteIndex, bitIndex)
 }
 
 func usage() {

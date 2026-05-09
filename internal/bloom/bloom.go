@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"hash"
 	"hash/fnv"
+	. "kvschool/internal/helpers"
 )
 
 type Filter struct {
@@ -39,7 +40,7 @@ func (f *Filter) Add(key []byte) error {
 		hashFunction := f.hashFunctions[i]
 		bitIndex, err := f.calculateBitIndex(key, hashFunction)
 		if err != nil {
-			return fmt.Errorf("bloom Add: calculate bucket index: %w", err)
+			return fmt.Errorf("bloom Add: calculate bit index: %w", err)
 		}
 
 		currentMask := f.masks[i]
@@ -54,7 +55,7 @@ func (f *Filter) MayContain(key []byte) (bool, error) {
 		hashFunction := f.hashFunctions[i]
 		bitIndex, err := f.calculateBitIndex(key, hashFunction)
 		if err != nil {
-			return false, fmt.Errorf("bloom MayContain: calculate bucket index: %w", err)
+			return false, fmt.Errorf("bloom MayContain: calculate bit index: %w", err)
 		}
 
 		currentMask := f.masks[i]
@@ -67,24 +68,9 @@ func (f *Filter) MayContain(key []byte) (bool, error) {
 }
 
 func (f *Filter) calculateBitIndex(key []byte, h hash.Hash64) (uint64, error) {
-	hashValue, err := calculateHash(key, h)
+	hashValue, err := CalculateKeyHash(key, h)
 	if err != nil {
-		return 0, fmt.Errorf("calculateBucketIndex: %w", err)
+		return 0, fmt.Errorf("bloom calculateBitIndex: %w", err)
 	}
 	return hashValue % f.maskSize, nil
-}
-
-func calculateHash(key []byte, h hash.Hash64) (uint64, error) {
-	n, err := h.Write(key)
-
-	if n < len(key) {
-		return 0, fmt.Errorf("bloom calculateHash: %d < %d", n, len(key))
-	}
-	if err != nil {
-		return 0, fmt.Errorf("bloom calculateHash: %w", err)
-	}
-
-	result := h.Sum64()
-	h.Reset()
-	return result, nil
 }

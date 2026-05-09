@@ -10,7 +10,7 @@ test-day2:
 	go test -tags=day2 ./... -count=1
 
 test-day3:
-	go test -tags=day3 ./...
+	go test -tags=day3 ./...  -count=1
 
 demo-wordcount:
 	go run ./cmd/kvtool wordcount -in ./testdata/text_small.txt
