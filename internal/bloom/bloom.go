@@ -1,30 +1,90 @@
 package bloom
 
-import "errors"
+import (
+	"fmt"
+	"hash"
+	"hash/fnv"
+)
 
-// ErrNotImplemented используется в заготовке практики третьего дня.
-var ErrNotImplemented = errors.New("bloom: функция не реализована")
+type Filter struct {
+	masks      []*bitBuffer
+	masksCount int
+	maskSize   uint64
 
-// Filter — вероятностный фильтр Блума ("Охранник диска").
-// Позволяет мгновенно сказать "НЕТ, ключа здесь нет" с вероятностью 100%.
-// Если говорит "ВОЗМОЖНО ЕСТЬ", придется проверять диск.
-type Filter struct{}
-
-// New создает новый фильтр.
-// size (m) — размер битового массива.
-// hashes (k) — количество хеш-функций.
-func New(size uint64, hashes uint8) *Filter { return &Filter{} }
-
-// Add добавляет ключ в фильтр.
-func (f *Filter) Add(_ []byte) error {
-	_ = f
-	return ErrNotImplemented
+	hashFunctions []hash.Hash64
 }
 
-// MayContain проверяет наличие ключа.
-// Возвращает false, если ключа точно нет.
-// Возвращает true, если ключ возможно есть (или произошел false positive).
-func (f *Filter) MayContain(_ []byte) (bool, error) {
-	_ = f
-	return false, ErrNotImplemented
+func New(size uint64, hashes uint8) *Filter {
+	masksCount := int(hashes)
+	maskSize := size
+
+	masks := make([]*bitBuffer, masksCount)
+	hashFunctions := make([]hash.Hash64, masksCount)
+
+	for i := 0; i < masksCount; i++ {
+		masks[i] = newBitBuffer(maskSize)
+		hashFunctions[i] = fnv.New64()
+	}
+
+	return &Filter{
+		masks:         masks,
+		masksCount:    masksCount,
+		maskSize:      maskSize,
+		hashFunctions: hashFunctions,
+	}
+}
+
+func (f *Filter) Add(key []byte) error {
+	for i := 0; i < f.masksCount; i++ {
+		hashFunction := f.hashFunctions[i]
+		bitIndex, err := f.calculateBitIndex(key, hashFunction)
+		if err != nil {
+			return fmt.Errorf("bloom Add: calculate bucket index: %w", err)
+		}
+
+		currentMask := f.masks[i]
+		currentMask.setBit(bitIndex, 1)
+	}
+
+	return nil
+}
+
+func (f *Filter) MayContain(key []byte) (bool, error) {
+	for i := 0; i < f.masksCount; i++ {
+		hashFunction := f.hashFunctions[i]
+		bitIndex, err := f.calculateBitIndex(key, hashFunction)
+		if err != nil {
+			return false, fmt.Errorf("bloom MayContain: calculate bucket index: %w", err)
+		}
+
+		currentMask := f.masks[i]
+		if currentMask.getBit(bitIndex) == 0 {
+			return false, nil
+		}
+	}
+
+	return true, nil
+}
+
+func (f *Filter) calculateBitIndex(key []byte, h hash.Hash64) (uint64, error) {
+	hashValue, err := calculateHash(key, h)
+	if err != nil {
+		return 0, fmt.Errorf("calculateBucketIndex: %w", err)
+	}
+	return hashValue % f.maskSize, nil
+}
+
+func calculateHash(key []byte, h hash.Hash64) (uint64, error) {
+	n, err := h.Write(key)
+
+	if n < len(key) {
+		return 0, fmt.Errorf("bloom calculateHash: %d < %d", n, len(key))
+	}
+	if err != nil {
+		return 0, fmt.Errorf("bloom calculateHash: %w", err)
+	}
+
+	result := h.Sum64()
+	h.Reset()
+	return result, nil
 }
