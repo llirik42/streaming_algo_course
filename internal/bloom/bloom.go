@@ -7,38 +7,52 @@ import (
 	. "kvschool/internal/helpers"
 )
 
+const (
+	saltSize = 128
+)
+
 type Filter struct {
 	masks      []*bitBuffer
-	masksCount int
+	masksCount uint8
 	maskSize   uint64
 
+	salt          [][]byte
 	hashFunctions []hash.Hash64
 }
 
 func New(size uint64, hashes uint8) *Filter {
-	masksCount := int(hashes)
+	masksCount := hashes
 	maskSize := size
 
 	masks := make([]*bitBuffer, masksCount)
 	hashFunctions := make([]hash.Hash64, masksCount)
+	salt := make([][]byte, masksCount)
 
-	for i := 0; i < masksCount; i++ {
+	var i uint8
+	for i = 0; i < masksCount; i++ {
 		masks[i] = newBitBuffer(maskSize)
 		hashFunctions[i] = fnv.New64()
+
+		newSalt, err := CreateSalt(saltSize)
+		if err != nil {
+			panic(err)
+		}
+		salt[i] = newSalt
 	}
 
 	return &Filter{
 		masks:         masks,
 		masksCount:    masksCount,
 		maskSize:      maskSize,
+		salt:          salt,
 		hashFunctions: hashFunctions,
 	}
 }
 
 func (f *Filter) Add(key []byte) error {
-	for i := 0; i < f.masksCount; i++ {
-		hashFunction := f.hashFunctions[i]
-		bitIndex, err := f.calculateBitIndex(key, hashFunction)
+	var i uint8
+	for i = 0; i < f.masksCount; i++ {
+		bitIndex, err := f.calculateBitIndex(key, i)
 		if err != nil {
 			return fmt.Errorf("bloom Add: calculate bit index: %w", err)
 		}
@@ -51,9 +65,9 @@ func (f *Filter) Add(key []byte) error {
 }
 
 func (f *Filter) MayContain(key []byte) (bool, error) {
-	for i := 0; i < f.masksCount; i++ {
-		hashFunction := f.hashFunctions[i]
-		bitIndex, err := f.calculateBitIndex(key, hashFunction)
+	var i uint8
+	for i = 0; i < f.masksCount; i++ {
+		bitIndex, err := f.calculateBitIndex(key, i)
 		if err != nil {
 			return false, fmt.Errorf("bloom MayContain: calculate bit index: %w", err)
 		}
@@ -67,8 +81,9 @@ func (f *Filter) MayContain(key []byte) (bool, error) {
 	return true, nil
 }
 
-func (f *Filter) calculateBitIndex(key []byte, h hash.Hash64) (uint64, error) {
-	hashValue, err := CalculateKeyHash(key, h)
+func (f *Filter) calculateBitIndex(key []byte, hashIndex uint8) (uint64, error) {
+	h := f.hashFunctions[hashIndex]
+	hashValue, err := CalculateKeyHash(key, h, f.salt[hashIndex])
 	if err != nil {
 		return 0, fmt.Errorf("bloom calculateBitIndex: %w", err)
 	}

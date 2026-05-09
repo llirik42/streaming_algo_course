@@ -17,3 +17,6 @@ demo-wordcount:
 
 lsm-kv:
 	go run ./cmd/kvtool load -count 10000 -store lsm
+
+count-min-sketch:
+	go run ./cmd/kvtool load -count 100000 -zipf 1.1 -report

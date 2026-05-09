@@ -7,22 +7,34 @@ import (
 	. "kvschool/internal/helpers"
 )
 
+const (
+	saltSize = 128
+)
+
 type CountMinSketch struct {
 	counters [][]uint64
 	width    uint64
 	depth    uint32
 
+	salt          [][]byte
 	hashFunctions []hash.Hash64
 }
 
 func NewCountMinSketch(width, depth uint32) *CountMinSketch {
 	counters := make([][]uint64, depth)
 	hashFunctions := make([]hash.Hash64, depth)
+	salt := make([][]byte, depth)
 
 	var i uint32
 	for i = 0; i < depth; i++ {
 		counters[i] = make([]uint64, width)
 		hashFunctions[i] = fnv.New64()
+
+		newSalt, err := CreateSalt(saltSize)
+		if err != nil {
+			panic(err)
+		}
+		salt[i] = newSalt
 	}
 
 	return &CountMinSketch{
@@ -30,14 +42,14 @@ func NewCountMinSketch(width, depth uint32) *CountMinSketch {
 		width:         uint64(width),
 		depth:         depth,
 		hashFunctions: hashFunctions,
+		salt:          salt,
 	}
 }
 
 func (c *CountMinSketch) Add(key []byte) error {
 	var i uint32
 	for i = 0; i < c.depth; i++ {
-		hashFunction := c.hashFunctions[i]
-		counterIndex, err := c.calculateCounterIndex(key, hashFunction)
+		counterIndex, err := c.calculateCounterIndex(key, i)
 		if err != nil {
 			return fmt.Errorf("cms Add: calculate counter index: %w", err)
 		}
@@ -55,8 +67,7 @@ func (c *CountMinSketch) Estimate(key []byte) (uint64, error) {
 
 	var i uint32
 	for i = 0; i < c.depth; i++ {
-		hashFunction := c.hashFunctions[i]
-		counterIndex, err := c.calculateCounterIndex(key, hashFunction)
+		counterIndex, err := c.calculateCounterIndex(key, i)
 		if err != nil {
 			return 0, fmt.Errorf("cms Estimate: calculate counter index: %w", err)
 		}
@@ -68,8 +79,9 @@ func (c *CountMinSketch) Estimate(key []byte) (uint64, error) {
 	return minCounter, nil
 }
 
-func (c *CountMinSketch) calculateCounterIndex(key []byte, h hash.Hash64) (uint64, error) {
-	hashValue, err := CalculateKeyHash(key, h)
+func (c *CountMinSketch) calculateCounterIndex(key []byte, hashIndex uint32) (uint64, error) {
+	h := c.hashFunctions[hashIndex]
+	hashValue, err := CalculateKeyHash(key, h, c.salt[hashIndex])
 	if err != nil {
 		return 0, fmt.Errorf("cms: calculateCounterIndex: %w", err)
 	}

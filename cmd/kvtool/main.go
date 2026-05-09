@@ -7,7 +7,9 @@ import (
 	"flag"
 	"fmt"
 	"kvschool/internal/kv/lsmstore"
+	"kvschool/internal/stream"
 	"log"
+	"math"
 	"math/rand"
 	"os"
 	"time"
@@ -18,56 +20,27 @@ import (
 	"kvschool/internal/testutil"
 )
 
-func setBit(b *uint8, i int, v uint8) {
-	if v != 0 && v != 1 {
-		panic("Invalid value")
-	}
-
-	if v == 1 {
-		*b |= 1 << i
-	} else {
-		*b &= ^(1 << i)
-	}
-}
-
-func getBit(b *uint8, i int) uint8 {
-	return (1 << i & *b) >> i
-}
-
 func main() {
-	//hf := fnv.New64()
-	//
-	//_, _ = hf.Write(helpers.StringToBytes("key"))
-	//fmt.Println(hf.Sum64())
-	//hf.Reset()
-	//
-	//_, _ = hf.Write(helpers.StringToBytes("key-1"))
-	//fmt.Println(hf.Sum64())
-	//hf.Reset()
-	//
-	//_, _ = hf.Write(helpers.StringToBytes("key"))
-	//fmt.Println(hf.Sum64())
-	//hf.Reset()
+	if len(os.Args) < 2 {
+		usage()
+		os.Exit(2)
+	}
 
-	//var b uint8 = 0
-	//fmt.Println(b)
-	//
-	//setBit(&b, 5, 1)
-	//fmt.Println(b)
-	//fmt.Println(getBit(&b, 1))
-
-	size := 10
-	//fmt.Println(math.Ceil(float64(size) / float64(8)))
-	bytesSize := size>>3 + 1
-	fmt.Println(bytesSize)
-
-	index := 1
-
-	byteIndex := index >> 3
-
-	bitIndex := index & 7
-
-	fmt.Println(byteIndex, bitIndex)
+	switch os.Args[1] {
+	case "wordcount":
+		if err := runWordCount(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "ошибка:", err)
+			os.Exit(1)
+		}
+	case "load":
+		if err := runLoad(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "ошибка:", err)
+			os.Exit(1)
+		}
+	default:
+		usage()
+		os.Exit(2)
+	}
 }
 
 func usage() {
@@ -134,6 +107,7 @@ func runLoad(args []string) error {
 	count := fs.Int("count", 10000, "количество операций")
 	zipf := fs.Float64("zipf", 0, "параметр s для Zipf (0 для равномерного, >1.0 для перекошенного)")
 	storeKind := fs.String("store", "memmap", "тип хранилища: memmap|skiplist|lsm")
+	report := fs.Bool("report", false, "статистика")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -159,12 +133,27 @@ func runLoad(args []string) error {
 	start := time.Now()
 	ctx := context.Background()
 
+	cms := stream.NewCountMinSketch(uint32(*count/10), 10)
+	var additionsCount = map[string]uint64{}
+
 	// Simple Mixed Workload: 50% Put, 50% Get
 	for i := 0; i < *count; i++ {
 		key := keyGen.Next()
 		if i%2 == 0 {
 			if err := st.Put(ctx, key, []byte("data")); err != nil {
 				return fmt.Errorf("ошибка put: %w", err)
+			}
+
+			if err := cms.Add(key); err != nil {
+				return fmt.Errorf("ошибка cms.add: %w", err)
+			}
+
+			keyString := string(key)
+			_, ok := additionsCount[keyString]
+			if !ok {
+				additionsCount[keyString] = 1
+			} else {
+				additionsCount[keyString]++
 			}
 		} else {
 			_, _ = st.Get(ctx, key)
@@ -173,6 +162,35 @@ func runLoad(args []string) error {
 
 	dur := time.Since(start)
 	fmt.Printf("Выполнено %d операций за %v (%.1f op/s)\n", *count, dur, float64(*count)/dur.Seconds())
+
+	if *report {
+		minEstimationErrorPercent := math.MaxFloat64
+		maxEstimationErrorPercent := 0.0
+		avgEstimationErrorPercent := 0.0
+
+		for key, realCount := range additionsCount {
+			estimatedCount, err := cms.Estimate([]byte(key))
+			if err != nil {
+				return fmt.Errorf("ошибка cms.estimate: %w", err)
+			}
+			if estimatedCount < realCount {
+				return fmt.Errorf("ошибка cms.estimate: underestimate")
+			}
+
+			estimationError := estimatedCount - realCount
+			estimationErrorPercent := float64(estimationError) / float64(realCount) * 100
+
+			avgEstimationErrorPercent += estimationErrorPercent
+
+			minEstimationErrorPercent = min(minEstimationErrorPercent, estimationErrorPercent)
+			maxEstimationErrorPercent = max(maxEstimationErrorPercent, estimationErrorPercent)
+
+			fmt.Printf("%s: real=%d, estimated=%d, error=%f%%\n", key, realCount, estimatedCount, estimationErrorPercent)
+		}
+
+		fmt.Printf("min_error=%f, average_error=%f, max_error=%f\n", minEstimationErrorPercent, avgEstimationErrorPercent/float64(len(additionsCount)), maxEstimationErrorPercent)
+	}
+
 	return nil
 }
 

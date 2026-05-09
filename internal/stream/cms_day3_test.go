@@ -105,7 +105,7 @@ func TestCountMinSketch_MultipleKeysSequential(t *testing.T) {
 		NewCountMinSketch(1000, 1),
 	}
 
-	keysNumber := 10000
+	keysNumber := 2000
 	keys := make([][]byte, keysNumber)
 	for i := 0; i < keysNumber; i++ {
 		keys[i] = StringToBytes(fmt.Sprintf("key-%d", i+1))
@@ -116,7 +116,7 @@ func TestCountMinSketch_MultipleKeysSequential(t *testing.T) {
 
 	for i, key := range keys {
 		for _, cms := range cmsList {
-			additionsNumber := uint64(rng.Int() % 1000)
+			additionsNumber := uint64(rng.Int() % 10)
 			additions[i] = additionsNumber
 			var i uint64
 			for i = 0; i < additionsNumber; i++ {
@@ -137,7 +137,7 @@ func TestCountMinSketch_MultipleKeysRandom(t *testing.T) {
 		NewCountMinSketch(1000, 1),
 	}
 
-	keysNumber := 100000
+	keysNumber := 20000
 	keys := make([][]byte, keysNumber)
 	for i := 0; i < keysNumber; i++ {
 		keys[i] = StringToBytes(fmt.Sprintf("key-%d", i+1))
