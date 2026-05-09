@@ -119,7 +119,7 @@ func runLoad(args []string) error {
 	}
 	defer st.Close()
 
-	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	rng := rand.New(rand.NewSource(0))
 	var keyGen testutil.KeyGenerator
 	if *zipf > 1.0 {
 		// 1000 items dictionary for zipf
@@ -133,7 +133,7 @@ func runLoad(args []string) error {
 	start := time.Now()
 	ctx := context.Background()
 
-	cms := stream.NewCountMinSketch(uint32(*count/10), 3)
+	cms := stream.NewCountMinSketch(uint32(*count/10), 2)
 	var additionsCount = map[string]uint64{}
 
 	// Simple Mixed Workload: 50% Put, 50% Get
@@ -188,7 +188,7 @@ func runLoad(args []string) error {
 			fmt.Printf("%s: real=%d, estimated=%d, error=%f%%\n", key, realCount, estimatedCount, estimationErrorPercent)
 		}
 
-		fmt.Printf("min_error=%f, average_error=%f, max_error=%f\n", minEstimationErrorPercent, avgEstimationErrorPercent/float64(len(additionsCount)), maxEstimationErrorPercent)
+		fmt.Printf("min_error=%f%%, average_error=%f%%, max_error=%f%%\n", minEstimationErrorPercent, avgEstimationErrorPercent/float64(len(additionsCount)), maxEstimationErrorPercent)
 	}
 
 	return nil
