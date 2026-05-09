@@ -104,7 +104,7 @@ func TestBloom_MultipleKeysSequential(t *testing.T) {
 		New(1024, 10),
 	}
 
-	keysNumber := 1024 * 30
+	keysNumber := 1024 * 50
 	keys := make([][]byte, keysNumber)
 	for i := 0; i < keysNumber; i++ {
 		keys[i] = StringToBytes(fmt.Sprintf("key-%d", i+1))

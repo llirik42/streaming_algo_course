@@ -3,12 +3,10 @@ package stream
 import (
 	"fmt"
 	"hash"
-	"hash/fnv"
 	. "kvschool/internal/helpers"
-)
 
-const (
-	saltSize = 128
+	"github.com/cespare/xxhash"
+	"github.com/spaolacci/murmur3"
 )
 
 type CountMinSketch struct {
@@ -16,33 +14,24 @@ type CountMinSketch struct {
 	width    uint64
 	depth    uint32
 
-	salt          [][]byte
-	hashFunctions []hash.Hash64
+	hf1 hash.Hash64
+	hf2 hash.Hash64
 }
 
 func NewCountMinSketch(width, depth uint32) *CountMinSketch {
 	counters := make([][]uint64, depth)
-	hashFunctions := make([]hash.Hash64, depth)
-	salt := make([][]byte, depth)
 
 	var i uint32
 	for i = 0; i < depth; i++ {
 		counters[i] = make([]uint64, width)
-		hashFunctions[i] = fnv.New64()
-
-		newSalt, err := CreateSalt(saltSize)
-		if err != nil {
-			panic(err)
-		}
-		salt[i] = newSalt
 	}
 
 	return &CountMinSketch{
-		counters:      counters,
-		width:         uint64(width),
-		depth:         depth,
-		hashFunctions: hashFunctions,
-		salt:          salt,
+		counters: counters,
+		width:    uint64(width),
+		depth:    depth,
+		hf1:      xxhash.New(),
+		hf2:      murmur3.New64(),
 	}
 }
 
@@ -80,10 +69,15 @@ func (c *CountMinSketch) Estimate(key []byte) (uint64, error) {
 }
 
 func (c *CountMinSketch) calculateCounterIndex(key []byte, hashIndex uint32) (uint64, error) {
-	h := c.hashFunctions[hashIndex]
-	hashValue, err := CalculateKeyHash(key, h, c.salt[hashIndex])
+	h1, err := CalculateKeyHash(key, c.hf1)
 	if err != nil {
-		return 0, fmt.Errorf("cms: calculateCounterIndex: %w", err)
+		return 0, fmt.Errorf("cms calculateCounterIndex(): hash 1: %w", err)
 	}
-	return hashValue % c.width, nil
+
+	h2, err := CalculateKeyHash(key, c.hf2)
+	if err != nil {
+		return 0, fmt.Errorf("cms calculateCounterIndex(): hash 2: %w", err)
+	}
+
+	return (h1 + (uint64(hashIndex)+1)*h2) % c.width, nil
 }

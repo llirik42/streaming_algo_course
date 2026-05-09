@@ -3,12 +3,10 @@ package bloom
 import (
 	"fmt"
 	"hash"
-	"hash/fnv"
 	. "kvschool/internal/helpers"
-)
 
-const (
-	saltSize = 128
+	"github.com/cespare/xxhash"
+	"github.com/spaolacci/murmur3"
 )
 
 type Filter struct {
@@ -16,36 +14,26 @@ type Filter struct {
 	masksCount uint8
 	maskSize   uint64
 
-	salt          [][]byte
-	hashFunctions []hash.Hash64
+	hf1 hash.Hash64
+	hf2 hash.Hash64
 }
 
 func New(size uint64, hashes uint8) *Filter {
 	masksCount := hashes
 	maskSize := size
-
 	masks := make([]*bitBuffer, masksCount)
-	hashFunctions := make([]hash.Hash64, masksCount)
-	salt := make([][]byte, masksCount)
 
 	var i uint8
 	for i = 0; i < masksCount; i++ {
 		masks[i] = newBitBuffer(maskSize)
-		hashFunctions[i] = fnv.New64()
-
-		newSalt, err := CreateSalt(saltSize)
-		if err != nil {
-			panic(err)
-		}
-		salt[i] = newSalt
 	}
 
 	return &Filter{
-		masks:         masks,
-		masksCount:    masksCount,
-		maskSize:      maskSize,
-		salt:          salt,
-		hashFunctions: hashFunctions,
+		masks:      masks,
+		masksCount: masksCount,
+		maskSize:   maskSize,
+		hf1:        xxhash.New(),
+		hf2:        murmur3.New64(),
 	}
 }
 
@@ -82,10 +70,15 @@ func (f *Filter) MayContain(key []byte) (bool, error) {
 }
 
 func (f *Filter) calculateBitIndex(key []byte, hashIndex uint8) (uint64, error) {
-	h := f.hashFunctions[hashIndex]
-	hashValue, err := CalculateKeyHash(key, h, f.salt[hashIndex])
+	h1, err := CalculateKeyHash(key, f.hf1)
 	if err != nil {
-		return 0, fmt.Errorf("bloom calculateBitIndex: %w", err)
+		return 0, fmt.Errorf("bloom calculateBitIndex(): hash 1: %w", err)
 	}
-	return hashValue % f.maskSize, nil
+
+	h2, err := CalculateKeyHash(key, f.hf2)
+	if err != nil {
+		return 0, fmt.Errorf("bloom calculateBitIndex(): hash 2: %w", err)
+	}
+
+	return (h1 + (uint64(hashIndex)+1)*h2) % f.maskSize, nil
 }

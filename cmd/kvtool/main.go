@@ -133,7 +133,7 @@ func runLoad(args []string) error {
 	start := time.Now()
 	ctx := context.Background()
 
-	cms := stream.NewCountMinSketch(uint32(*count/10), 10)
+	cms := stream.NewCountMinSketch(uint32(*count/10), 3)
 	var additionsCount = map[string]uint64{}
 
 	// Simple Mixed Workload: 50% Put, 50% Get
