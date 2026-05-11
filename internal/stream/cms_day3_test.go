@@ -1,17 +1,27 @@
-//go:build day3
+////go:build day3
 
 package stream
 
 import (
 	"fmt"
 	. "kvschool/internal/helpers"
+	"math"
 	"math/rand"
+	"os"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 func addKey(t *testing.T, cms *CountMinSketch, key []byte) {
 	if err := cms.Add(key); err != nil {
 		t.Errorf("Adding key error = %v", err)
+	}
+}
+
+func addKeyB(b *testing.B, cms *CountMinSketch, key []byte) {
+	if err := cms.Add(key); err != nil {
+		b.Errorf("Adding key error = %v", err)
 	}
 }
 
@@ -23,6 +33,28 @@ func estimate(t *testing.T, cms *CountMinSketch, key []byte, bottom uint64) {
 
 	if est < bottom {
 		t.Errorf("Underestimate = %v < %v", est, bottom)
+	}
+}
+
+func estimateB(b *testing.B, cms *CountMinSketch, key []byte) uint64 {
+	est, err := cms.Estimate(key)
+
+	if err != nil {
+		b.Errorf("Estimate error = %v", err)
+	}
+
+	return est
+}
+
+func appendToFile(b *testing.B, file *os.File, content string) {
+	n, err := file.Write([]byte(content))
+
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	if n != len(content) {
+		b.Fatalf("Wrote %d, expected %d", n, len(content))
 	}
 }
 
@@ -159,6 +191,74 @@ func TestCountMinSketch_MultipleKeysRandom(t *testing.T) {
 	for i, key := range keys {
 		for _, cms := range cmsList {
 			estimate(t, cms, key, additions[i])
+		}
+	}
+}
+
+func Benchmark_FrequenciesEstimation(b *testing.B) {
+	keysNumber := 10000
+
+	distributionFunctions := map[string]func(keyIndex uint64) uint64{
+		"uniform": func(keyIndex uint64) uint64 {
+			return uint64(keysNumber / 2)
+		},
+		"linear": func(keyIndex uint64) uint64 {
+			return keyIndex + 1
+		},
+		"sqrt": func(keyIndex uint64) uint64 {
+			return uint64(math.Sqrt(float64(keyIndex))) + 1
+		},
+		"sin": func(keyIndex uint64) uint64 {
+			return uint64((math.Sin(float64(keyIndex)/float64(keysNumber/15)) + 2) * float64(keysNumber) / 2)
+		},
+		"normal": func(keyIndex uint64) uint64 {
+			center := float64(keysNumber / 2)
+			sigma := float64(keysNumber / 10)
+			normal := 1 / (math.Sqrt(math.Pi*2) * sigma) * math.Exp(-0.5*((float64(keyIndex)-center)*(float64(keyIndex)-center)/(sigma*sigma)))
+			return uint64(normal*float64(keysNumber)*float64(keysNumber)/20 + float64(keysNumber)/1000.0)
+		},
+		"zipf": func(keyIndex uint64) uint64 {
+			return uint64(float64(keysNumber)/(float64(keyIndex)+1.0) + float64(keysNumber)/1000.0)
+		},
+	}
+
+	keys := make([][]byte, keysNumber)
+	for i := 0; i < keysNumber; i++ {
+		keys[i] = StringToBytes(uuid.New().String())
+	}
+
+	epsilon := 0.001
+	p := 0.01
+	bList := []int{2}
+
+	file, err := os.Create("distribution.log")
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	for title, function := range distributionFunctions {
+		b.Logf("Starting %s\n", title)
+
+		for _, base := range bList {
+			w := uint32(math.Ceil(float64(base) / epsilon))
+			d := max(1, uint32(math.Ceil(math.Log(1/p)/math.Log(float64(base)))))
+
+			cms := NewCountMinSketch(w, d)
+
+			appendToFile(b, file, fmt.Sprintf("function=%s, keys=%d, epsilon=%f, probability=%f, base=%d, width=%d, depth=%d\n", title, keysNumber, epsilon, p, base, w, d))
+			for keyIndex, k := range keys {
+				expectedFrequency := function(uint64(keyIndex))
+				appendToFile(b, file, fmt.Sprintf("keyIndex=%d, real=%d\n", keyIndex, expectedFrequency))
+
+				var i uint64
+				for i = 0; i < expectedFrequency; i++ {
+					addKeyB(b, cms, k)
+				}
+			}
+
+			for keyIndex, k := range keys {
+				appendToFile(b, file, fmt.Sprintf("keyIndex=%d, estimated=%d\n", keyIndex, estimateB(b, cms, k)))
+			}
 		}
 	}
 }
