@@ -1,4 +1,4 @@
-////go:build day3
+//go:build day3
 
 package stream
 
